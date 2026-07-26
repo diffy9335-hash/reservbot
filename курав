@@ -526,6 +526,9 @@ async def main_menu_keyboard(username: str = None, user_id: str = None):
         kb.append([InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")])
         
     return InlineKeyboardMarkup(inline_keyboard=kb)
+# ============================================================
+# ЧАСТЬ 2: ОБРАБОТЧИКИ КОМАНД И КОЛБЭКОВ
+# ============================================================
 
 @dp.callback_query(F.data == "menu_online")
 async def online_handler(callback: CallbackQuery):
@@ -833,7 +836,10 @@ async def claim_quests_handler(callback: CallbackQuery):
     else:
         await callback.answer("Нет доступных наград.", show_alert=True)
 
-# --- ИСПРАВЛЕННАЯ ЛИЧНАЯ ЖИЗНЬ ---
+# ============================================================
+# ИСПРАВЛЕННАЯ ЛИЧНАЯ ЖИЗНЬ (ВСЕ КНОПКИ С ПРЕФИКСОМ "pl_")
+# ============================================================
+
 @dp.callback_query(F.data == "menu_personal_life")
 @with_user_lock
 async def personal_life_menu(callback: CallbackQuery):
@@ -844,40 +850,47 @@ async def personal_life_menu(callback: CallbackQuery):
 
     kb_buttons = []
     
-    kb_buttons.append([InlineKeyboardButton(text="🍽 Ресторан (-500$)", callback_data="personal:rest")])
+    # Ресторан
+    kb_buttons.append([InlineKeyboardButton(text="🍽 Ресторан (-500$)", callback_data="pl_rest")])
     
+    # Отношения
     if p.get("married", False):
-        kb_buttons.append([InlineKeyboardButton(text="💕 Свидание с женой (-2000$)", callback_data="personal:date_married")])
+        kb_buttons.append([InlineKeyboardButton(text="💕 Свидание с женой (-2000$)", callback_data="pl_date_married")])
         if p.get("children", 0) < 2:
-            kb_buttons.append([InlineKeyboardButton(text="👶 Завести ребёнка (-15000$)", callback_data="personal:child")])
-        kb_buttons.append([InlineKeyboardButton(text="💔 Развод (-5000$)", callback_data="personal:divorce")])
+            kb_buttons.append([InlineKeyboardButton(text="👶 Завести ребёнка (-15000$)", callback_data="pl_child")])
+        kb_buttons.append([InlineKeyboardButton(text="💔 Развод (-5000$)", callback_data="pl_divorce")])
     else:
         if p.get("girlfriend", "Нет") == "Есть":
-            kb_buttons.append([InlineKeyboardButton(text="💍 Жениться (-10000$)", callback_data="personal:marry")])
-            kb_buttons.append([InlineKeyboardButton(text="💃 Свидание (-2000$)", callback_data="personal:date")])
+            kb_buttons.append([InlineKeyboardButton(text="💍 Жениться (-10000$)", callback_data="pl_marry")])
+            kb_buttons.append([InlineKeyboardButton(text="💃 Свидание (-2000$)", callback_data="pl_date")])
         else:
-            kb_buttons.append([InlineKeyboardButton(text="💃 Найти девушку (-2000$)", callback_data="personal:find_girl")])
+            kb_buttons.append([InlineKeyboardButton(text="💃 Найти девушку (-2000$)", callback_data="pl_find_girl")])
     
+    # Бизнес
     if p.get("business"):
-        kb_buttons.append([InlineKeyboardButton(text=f"{BUSINESSES[p['business']]['emoji']} Управлять бизнесом", callback_data="personal:business_manage")])
+        kb_buttons.append([InlineKeyboardButton(text=f"{BUSINESSES[p['business']]['emoji']} Управлять бизнесом", callback_data="pl_business_manage")])
     else:
-        kb_buttons.append([InlineKeyboardButton(text="💼 Открыть бизнес", callback_data="personal:open_business")])
+        kb_buttons.append([InlineKeyboardButton(text="💼 Открыть бизнес", callback_data="pl_open_business")])
     
-    kb_buttons.append([InlineKeyboardButton(text="🧘 Йога (-2000$)", callback_data="personal:yoga")])
-    kb_buttons.append([InlineKeyboardButton(text="🪂 Парашют (-10000$)", callback_data="personal:skydive")])
-    kb_buttons.append([InlineKeyboardButton(text="🎁 Благотворительность (-5000$)", callback_data="personal:charity")])
+    # Здоровье и хобби
+    kb_buttons.append([InlineKeyboardButton(text="🧘 Йога (-2000$)", callback_data="pl_yoga")])
+    kb_buttons.append([InlineKeyboardButton(text="🪂 Парашют (-10000$)", callback_data="pl_skydive")])
+    kb_buttons.append([InlineKeyboardButton(text="🎁 Благотворительность (-5000$)", callback_data="pl_charity")])
     
-    kb_buttons.append([InlineKeyboardButton(text="🎉 Вечеринка (-5000$)", callback_data="personal:party")])
-    kb_buttons.append([InlineKeyboardButton(text="🎙 Интервью СМИ", callback_data="personal:interview_smi")])
-    kb_buttons.append([InlineKeyboardButton(text="📸 Встреча с фанатами", callback_data="personal:fans")])
+    # Социальная жизнь
+    kb_buttons.append([InlineKeyboardButton(text="🎉 Вечеринка (-5000$)", callback_data="pl_party")])
+    kb_buttons.append([InlineKeyboardButton(text="🎙 Интервью СМИ", callback_data="pl_interview_smi")])
+    kb_buttons.append([InlineKeyboardButton(text="📸 Встреча с фанатами", callback_data="pl_fans")])
     
-    kb_buttons.append([InlineKeyboardButton(text="✈ Отдых на курорте (-25000$)", callback_data="personal:vacation")])
-    kb_buttons.append([InlineKeyboardButton(text="🌍 Поиск клуба за границей (-15000$)", callback_data="personal:find_club")])
+    # Путешествия
+    kb_buttons.append([InlineKeyboardButton(text="✈ Отдых на курорте (-25000$)", callback_data="pl_vacation")])
+    kb_buttons.append([InlineKeyboardButton(text="🌍 Поиск клуба за границей (-15000$)", callback_data="pl_find_club")])
     
+    # Машина
     if p.get("car"):
-        kb_buttons.append([InlineKeyboardButton(text=f"🚗 {p['car']} (продать)", callback_data="personal:sell_car")])
+        kb_buttons.append([InlineKeyboardButton(text=f"🚗 {p['car']} (продать)", callback_data="pl_sell_car")])
     else:
-        kb_buttons.append([InlineKeyboardButton(text="🚗 Купить машину", callback_data="personal:buy_car")])
+        kb_buttons.append([InlineKeyboardButton(text="🚗 Купить машину", callback_data="pl_buy_car")])
     
     kb_buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")])
 
@@ -908,9 +921,11 @@ async def personal_life_menu(callback: CallbackQuery):
     await callback.message.delete()
     await callback.message.answer(text=text, reply_markup=kb, parse_mode="Markdown")
 
-@dp.callback_query(F.data == "personal:rest")
+# --- ВСЕ ОБРАБОТЧИКИ ЛИЧНОЙ ЖИЗНИ (С ПРЕФИКСОМ "pl_") ---
+
+@dp.callback_query(F.data == "pl_rest")
 @with_user_lock
-async def personal_rest(callback: CallbackQuery):
+async def pl_rest(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -927,9 +942,9 @@ async def personal_rest(callback: CallbackQuery):
     await callback.answer("🍽 Ты отлично поужинал! Усталость -15%!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:find_girl")
+@dp.callback_query(F.data == "pl_find_girl")
 @with_user_lock
-async def personal_find_girl(callback: CallbackQuery):
+async def pl_find_girl(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -952,9 +967,9 @@ async def personal_find_girl(callback: CallbackQuery):
     await callback.answer(msg, show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:date")
+@dp.callback_query(F.data == "pl_date")
 @with_user_lock
-async def personal_date(callback: CallbackQuery):
+async def pl_date(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -981,9 +996,9 @@ async def personal_date(callback: CallbackQuery):
     await callback.answer(msg, show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:date_married")
+@dp.callback_query(F.data == "pl_date_married")
 @with_user_lock
-async def personal_date_married(callback: CallbackQuery):
+async def pl_date_married(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1005,9 +1020,9 @@ async def personal_date_married(callback: CallbackQuery):
     await callback.answer("💕 Романтический ужин с женой! Лояльность +10, доверие +3!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:marry")
+@dp.callback_query(F.data == "pl_marry")
 @with_user_lock
-async def personal_marry(callback: CallbackQuery):
+async def pl_marry(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1031,9 +1046,9 @@ async def personal_marry(callback: CallbackQuery):
     await callback.answer("💍 ПОЗДРАВЛЯЮ! Ты женился! +15 доверия, +10 мотивации!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:child")
+@dp.callback_query(F.data == "pl_child")
 @with_user_lock
-async def personal_child(callback: CallbackQuery):
+async def pl_child(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1057,9 +1072,9 @@ async def personal_child(callback: CallbackQuery):
     await callback.answer(f"👶 ПОЗДРАВЛЯЮ! У тебя родился ребёнок! +20 доверия, +15 мотивации!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:divorce")
+@dp.callback_query(F.data == "pl_divorce")
 @with_user_lock
-async def personal_divorce(callback: CallbackQuery):
+async def pl_divorce(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1083,9 +1098,9 @@ async def personal_divorce(callback: CallbackQuery):
     await personal_life_menu(callback)
 
 # --- БИЗНЕС ---
-@dp.callback_query(F.data == "personal:open_business")
+@dp.callback_query(F.data == "pl_open_business")
 @with_user_lock
-async def personal_open_business(callback: CallbackQuery):
+async def pl_open_business(callback: CallbackQuery):
     user_id = await get_uid(callback)
     p = (await load_data(PLAYERS_FILE)).get(user_id)
     if await deny_if_retired_cb(callback, p): return
@@ -1129,9 +1144,9 @@ async def business_choice(callback: CallbackQuery):
     await callback.answer(f"✅ Ты открыл {business}! Теперь он приносит доход каждый тур!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:business_manage")
+@dp.callback_query(F.data == "pl_business_manage")
 @with_user_lock
-async def business_manage(callback: CallbackQuery):
+async def pl_business_manage(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1212,9 +1227,9 @@ async def business_sell(callback: CallbackQuery):
     await personal_life_menu(callback)
 
 # --- ЗДОРОВЬЕ И ХОББИ ---
-@dp.callback_query(F.data == "personal:yoga")
+@dp.callback_query(F.data == "pl_yoga")
 @with_user_lock
-async def personal_yoga(callback: CallbackQuery):
+async def pl_yoga(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1233,9 +1248,9 @@ async def personal_yoga(callback: CallbackQuery):
     await callback.answer("🧘 Отличная тренировка! Усталость -15%, доверие +2! (Бонус к тренировке)", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:skydive")
+@dp.callback_query(F.data == "pl_skydive")
 @with_user_lock
-async def personal_skydive(callback: CallbackQuery):
+async def pl_skydive(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1262,9 +1277,9 @@ async def personal_skydive(callback: CallbackQuery):
     
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:charity")
+@dp.callback_query(F.data == "pl_charity")
 @with_user_lock
-async def personal_charity(callback: CallbackQuery):
+async def pl_charity(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1283,9 +1298,9 @@ async def personal_charity(callback: CallbackQuery):
     await personal_life_menu(callback)
 
 # --- СОЦИАЛЬНАЯ ЖИЗНЬ ---
-@dp.callback_query(F.data == "personal:party")
+@dp.callback_query(F.data == "pl_party")
 @with_user_lock
-async def personal_party(callback: CallbackQuery):
+async def pl_party(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1312,10 +1327,10 @@ async def personal_party(callback: CallbackQuery):
     await callback.answer(msg, show_alert=True)
     await personal_life_menu(callback)
 
-# --- ИСПРАВЛЕННОЕ ИНТЕРВЬЮ В СМИ ---
-@dp.callback_query(F.data == "personal:interview_smi")
+# --- ИНТЕРВЬЮ В СМИ ---
+@dp.callback_query(F.data == "pl_interview_smi")
 @with_user_lock
-async def personal_interview_smi(callback: CallbackQuery, state: FSMContext):
+async def pl_interview_smi(callback: CallbackQuery, state: FSMContext):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1384,9 +1399,9 @@ async def smi_interview_answer(callback: CallbackQuery, state: FSMContext):
     await callback.answer(f"✅ Интервью опубликовано! +{trust_gain} доверия, +{rep_gain} репутации!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:fans")
+@dp.callback_query(F.data == "pl_fans")
 @with_user_lock
-async def personal_fans(callback: CallbackQuery):
+async def pl_fans(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1402,9 +1417,9 @@ async def personal_fans(callback: CallbackQuery):
     await personal_life_menu(callback)
 
 # --- ПУТЕШЕСТВИЯ ---
-@dp.callback_query(F.data == "personal:vacation")
+@dp.callback_query(F.data == "pl_vacation")
 @with_user_lock
-async def personal_vacation(callback: CallbackQuery):
+async def pl_vacation(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1422,9 +1437,9 @@ async def personal_vacation(callback: CallbackQuery):
     await callback.answer("✈️ Ты отлично отдохнул на курорте! Усталость обнулена, пропущено 3 тура!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:find_club")
+@dp.callback_query(F.data == "pl_find_club")
 @with_user_lock
-async def personal_find_club(callback: CallbackQuery, state: FSMContext):
+async def pl_find_club(callback: CallbackQuery, state: FSMContext):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1492,9 +1507,9 @@ async def find_club_offer_accept(callback: CallbackQuery, state: FSMContext):
     await personal_life_menu(callback)
 
 # --- МАШИНЫ ---
-@dp.callback_query(F.data == "personal:buy_car")
+@dp.callback_query(F.data == "pl_buy_car")
 @with_user_lock
-async def personal_buy_car(callback: CallbackQuery):
+async def pl_buy_car(callback: CallbackQuery):
     user_id = await get_uid(callback)
     p = (await load_data(PLAYERS_FILE)).get(user_id)
     if await deny_if_retired_cb(callback, p): return
@@ -1537,9 +1552,9 @@ async def car_choice(callback: CallbackQuery):
     await callback.answer(f"🚗 Поздравляю! Ты купил {car}! +5 репутации!", show_alert=True)
     await personal_life_menu(callback)
 
-@dp.callback_query(F.data == "personal:sell_car")
+@dp.callback_query(F.data == "pl_sell_car")
 @with_user_lock
-async def personal_sell_car(callback: CallbackQuery):
+async def pl_sell_car(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -1558,6 +1573,10 @@ async def personal_sell_car(callback: CallbackQuery):
     
     await callback.answer(f"🏷️ Ты продал {car} за {price:,}$! -3 репутации", show_alert=True)
     await personal_life_menu(callback)
+# ============================================================
+# ЧАСТЬ 3: ТРЕНИРОВКИ, ТАБЛИЦА, ПРОФИЛЬ, МАТЧИ,
+# СТАРТ, АДМИНКА, ЗАПУСК
+# ============================================================
 
 # --- ТРЕНИРОВКИ ---
 @dp.callback_query(F.data == "menu_train_choice")
@@ -3051,7 +3070,7 @@ async def main():
     print("📌 Добавлена бразильская лига")
     print("📌 Расширена личная жизнь (бизнес, семья, репутация, мотивация)")
     print("📌 8 вопросов для интервью, 3 случайных")
-    print("📌 ИСПРАВЛЕНЫ КНОПКИ ЛИЧНОЙ ЖИЗНИ И ИНТЕРВЬЮ В СМИ")
+    print("📌 ИСПРАВЛЕНЫ КНОПКИ ЛИЧНОЙ ЖИЗНИ (префикс pl_)")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
