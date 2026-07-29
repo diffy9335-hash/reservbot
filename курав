@@ -910,7 +910,6 @@ async def personal_life_menu(callback: CallbackQuery):
 
     # Социальная жизнь
     kb_buttons.append([InlineKeyboardButton(text="🎉 Вечеринка (-5000$)", callback_data="pl_party")])
-    kb_buttons.append([InlineKeyboardButton(text="🎙 Интервью СМИ", callback_data="pl_interview_smi")])
     kb_buttons.append([InlineKeyboardButton(text="📸 Встреча с фанатами", callback_data="pl_fans")])
 
     # Путешествия
@@ -1401,77 +1400,6 @@ async def pl_party(callback: CallbackQuery):
         logging.error(f"pl_party menu error: {e}")
 
 # --- ИНТЕРВЬЮ В СМИ ---
-@dp.callback_query(F.data == "pl_interview_smi")
-@with_user_lock
-async def pl_interview_smi(callback: CallbackQuery, state: FSMContext):
-    user_id = await get_uid(callback)
-    players = await load_data(PLAYERS_FILE)
-    p = players.get(user_id)
-    if await deny_if_retired_cb(callback, p): return
-
-    if p.get("last_interview_tour", 0) == p.get("tour", 1):
-        return await callback.answer("❌ Ты уже давал интервью в этом туре!", show_alert=True)
-
-    smi_questions = [
-        ("Как ты готовишься к матчам?", 
-         "Смотрю видео и работаю над слабыми местами", 
-         "Доверяю интуиции, импровизирую на поле",
-         "Тренируюсь до седьмого пота, дисциплина — это всё"),
-        ("Что для тебя главное в футболе?", 
-         "Командный дух и победы", 
-         "Личные достижения и рекорды",
-         "Удовольствие от игры и любовь болельщиков"),
-        ("Кто твой кумир в футболе?", 
-         "Мой отец/тренер, он научил меня всему", 
-         "Легенды прошлого: Пеле, Марадона",
-         "Современные звёзды: Месси, Роналду")
-    ]
-
-    q = random.choice(smi_questions)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"A) {q[1]}", callback_data=f"smi_interview:a")],
-        [InlineKeyboardButton(text=f"B) {q[2]}", callback_data=f"smi_interview:b")],
-        [InlineKeyboardButton(text=f"C) {q[3]}", callback_data=f"smi_interview:c")]
-    ])
-
-    await state.update_data(smi_question=q)
-    await _safe_edit_or_send(callback, f"🎙 <b>Интервью в СМИ</b>\n\n_{q[0]}_\n\nВыбери ответ:", kb)
-
-@dp.callback_query(F.data.startswith("smi_interview:"))
-@with_user_lock
-async def smi_interview_answer(callback: CallbackQuery, state: FSMContext):
-    user_id = await get_uid(callback)
-    players = await load_data(PLAYERS_FILE)
-    p = players.get(user_id)
-    if await deny_if_retired_cb(callback, p): return
-
-    data = await state.get_data()
-    q = data.get("smi_question")
-
-    if not q:
-        return await callback.answer("❌ Ошибка! Попробуй снова.", show_alert=True)
-
-    choice = callback.data.split(":")[1]
-    trust_gain = 3 if choice == "a" else 1 if choice == "b" else 2
-    rep_gain = 2 if choice == "a" else 3 if choice == "b" else 4
-
-    if choice == "c":
-        rep_gain = 4
-
-    p["trust"] = min(100, p.get("trust", 0) + trust_gain)
-    p["reputation"] = min(100, p.get("reputation", 50) + rep_gain)
-    p["last_interview_tour"] = p.get("tour", 1)
-    players[user_id] = p
-    await save_data(PLAYERS_FILE, players)
-
-    await state.update_data(smi_question=None)
-
-    await callback.answer(f"✅ Интервью опубликовано! +{trust_gain} доверия, +{rep_gain} репутации!", show_alert=True)
-    try:
-        await personal_life_menu(callback)
-    except Exception as e:
-        logging.error(f"smi_interview_answer menu error: {e}")
-
 @dp.callback_query(F.data == "pl_fans")
 @with_user_lock
 async def pl_fans(callback: CallbackQuery):
@@ -2269,6 +2197,287 @@ async def act_pass_handler(callback: CallbackQuery, state: FSMContext):
         m["log"] += f"✅ <b>{m['minute']}'</b> | Шикарный точный пас на партнера, и он вколачивает мяч в сетку! ГОЛ!\n"
     else:
         m["log"] += f"❌ <b>{m['minute']}'</b> | Пас оказался неточным, перехват соперника.\n"
+
+    m["current_moment"] += 1
+    await state.update_data(match=m)
+    await generate_moment(callback, state, user_id)
+
+
+# --- ГЕНЕРАЦИЯ МОМЕНТОВ МАТЧА ---
+async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
+    data = await state.get_data()
+    if "match" not in data:
+        return
+    m = data["match"]
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+
+    m["minute"] += random.randint(15, 25)
+    if m["minute"] > 90: m["minute"] = 90
+
+    my_rating = CLUB_RATINGS.get(p["club"], 50)
+    rival_rating = CLUB_RATINGS.get(m["rival"], 50)
+    rating_diff = my_rating - rival_rating
+
+    if random.random() < 0.65:
+        if random.random() < 0.5:
+            rival_score_chance = 0.40 - (rating_diff * 0.02)
+            if random.random() < max(0.05, min(0.95, rival_score_chance)):
+                m["rival_team_score"] += 1
+                m["log"] += f"⚡ <b>{m['minute']}'</b> | ГОЛ! Соперник забивает мяч в ваши ворота.
+"
+        else:
+            team_score_chance = 0.40 + (rating_diff * 0.02)
+            if random.random() < max(0.05, min(0.95, team_score_chance)):
+                m["my_team_score"] += 1
+                m["log"] += f"⚽ <b>{m['minute']}'</b> | ГОЛ! Твоя команда забивает отличный гол!
+"
+
+    if random.random() < 0.4:
+        flavor = random.choice([
+            "🔥 Красивый финт в центре поля обостряет игру.", 
+            "📐 Подача углового, но защита выносит мяч.", 
+            "🟨 Судья показывает желтую карточку игроку соперника.",
+            "⚔️ Жесткий стык, но судья не дает свисток.",
+            "👐 Вратарь уверенно забирает мяч после навеса."
+        ])
+        m["log"] += f"⏱ <b>{m['minute']}'</b> | {flavor}
+"
+
+    if random.random() < 0.08:
+        card_roll = random.random()
+        if card_roll < 0.15:
+            m["log"] += f"🟥 <b>{m['minute']}'</b> | ПРЯМАЯ КРАСНАЯ! Грубейший фол, ты удален с поля!
+"
+            m["minute"] = 90
+        else:
+            m["log"] += f"🟨 <b>{m['minute']}'</b> | Судья показывает тебе желтую карточку за срыв атаки.
+"
+            m["yellow_cards"] = m.get("yellow_cards", 0) + 1
+            if m["yellow_cards"] >= 2:
+                m["log"] += f"🟥 <b>{m['minute']}'</b> | ВТОРАЯ ЖЕЛТАЯ! ТЕБЯ УДАЛЯЮТ С ПОЛЯ!
+"
+                m["minute"] = 90
+
+    if m["current_moment"] > m["total_moments"] or m["minute"] == 90:
+        is_knockout = False
+        if m["is_cup"]:
+            is_knockout = True
+
+        if is_knockout and m["my_team_score"] == m["rival_team_score"]:
+            await start_penalty_shootout(callback, state, user_id)
+        else:
+            await finish_match(callback, state, user_id)
+        return
+
+    text = (f"⏱ <b>{m['minute']}' МИНУТА</b> | Момент {m['current_moment']}/{m['total_moments']}
+"
+            f"⚔️ <b>{p['club']}</b> vs <b>{m['rival']}</b>
+"
+            f"Счет: <b>{m['my_team_score']} : {m['rival_team_score']}</b>
+
+"
+            f"📝 <b>События матча:</b>
+{m['log'] or 'Идет плотная позиционная борьба...'}
+")
+
+    m["log"] = "" 
+
+    if p["position"] == "GK":
+        text += "🚨 <b>Опасность! Нападающий соперника выходит один на один с тобой! Твои действия?</b>"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🧤 Прыгнуть в левый угол", callback_data="gk_act:left"), InlineKeyboardButton(text="🧤 Прыгнуть в правый угол", callback_data="gk_act:right")],
+            [InlineKeyboardButton(text="🏃 Сблизить дистанцию", callback_data="gk_act:rush")]
+        ])
+    elif p["position"] == "CB":
+        if random.random() < 0.75:
+            text += "🛡️ <b>Форвард соперника идет на дриблинге прямо в твою зону!</b>"
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🧲 Жесткий подкат", callback_data="cb_act:tackle_hard"), InlineKeyboardButton(text="🕴️ Встретить корпусом", callback_data="cb_act:tackle_smart")],
+                [InlineKeyboardButton(text="📐 Отдать пас ближнему", callback_data="act:pass")]
+            ])
+        else:
+            text += "🔥 <b>Ты подключился на угловой! Мяч летит к тебе!</b>"
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎯 Пробить головой", callback_data="act:shoot_menu"), InlineKeyboardButton(text="📐 Сбросить под удар партнеру", callback_data="act:pass")]
+            ])
+    else:
+        text += "🔥 <b>Ты контролируешь мяч на подступах к штрафной! Твое решение?</b>"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎯 Пробить по воротам", callback_data="act:shoot_menu"), InlineKeyboardButton(text="📐 Отдать пас", callback_data="act:pass")]
+        ])
+
+    await state.update_data(match=m)
+
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except:
+        await callback.message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+# --- ОБРАБОТЧИКИ ДЕЙСТВИЙ В МАТЧЕ ---
+@dp.callback_query(F.data.startswith("gk_act:"))
+@with_user_lock
+async def gk_action_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if "match" not in data:
+        return await callback.answer("⏳ Матч уже завершен!", show_alert=True)
+    m = data["match"]
+    action = callback.data.split(":")[1]
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+
+    rival_rating = CLUB_RATINGS.get(m["rival"], 50)
+    save_chance = 0.30 + ((p["rating"] - rival_rating) * 0.015) + (p["rating"] * 0.004)
+    save_chance = max(0.1, min(0.95, save_chance))
+
+    opp_shoot_dir = random.choice(["left", "right", "center"])
+
+    is_saved = False
+    if action == "rush":
+        if random.random() < (save_chance + 0.1): is_saved = True
+    else:
+        if action == opp_shoot_dir or random.random() < save_chance * 0.8: is_saved = True
+
+    if is_saved:
+        m["saves"] += 1
+        m["log"] += f"🧤 <b>{m['minute']}'</b> | БЕЗУМНЫЙ СЕЙВ! Ты вытаскиваешь мертвейший мяч!
+"
+    else:
+        m["rival_team_score"] += 1
+        m["log"] += f"⚡ <b>{m['minute']}'</b> | Гол... Оппонент технично переиграл тебя на противоходе.
+"
+
+    m["current_moment"] += 1
+    await state.update_data(match=m)
+    await generate_moment(callback, state, user_id)
+
+@dp.callback_query(F.data.startswith("cb_act:"))
+@with_user_lock
+async def cb_action_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if "match" not in data:
+        return await callback.answer("⏳ Матч уже завершен!", show_alert=True)
+    m = data["match"]
+    action = callback.data.split(":")[1]
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+
+    rival_rating = CLUB_RATINGS.get(m["rival"], 50)
+    tackle_chance = 0.30 + ((p["rating"] - rival_rating) * 0.015) + (p["rating"] * 0.003)
+    tackle_chance = max(0.1, min(0.90, tackle_chance))
+
+    if action == "tackle_hard":
+        if random.random() < 0.15:
+            m["rival_team_score"] += 1
+            m["log"] += f"⚡ <b>{m['minute']}'</b> | Фол в штрафной! Ты сфолил, соперник забивает пенальти.
+"
+        elif random.random() < tackle_chance:
+            m["tackles"] += 1
+            m["log"] += f"🛡️ <b>{m['minute']}'</b> | Мощнейший чистый подкат! Форвард лежит, мяч отобран!
+"
+        else:
+            m["rival_team_score"] += 1
+            m["log"] += f"⚡ <b>{m['minute']}'</b> | Ошибка! Нападающий пробросил мяч мимо тебя и забил.
+"
+    else:
+        if random.random() < tackle_chance:
+            m["tackles"] += 1
+            m["log"] += f"🛡️ <b>{m['minute']}'</b> | Отличный выбор позиции. Ты заблокировал продвижение соперника.
+"
+        else:
+            m["rival_team_score"] += 1
+            m["log"] += f"⚡ <b>{m['minute']}'</b> | Тебя легко обыграли на замахе. Гол.
+"
+
+    m["current_moment"] += 1
+    await state.update_data(match=m)
+    await generate_moment(callback, state, user_id)
+
+@dp.callback_query(F.data == "act:shoot_menu")
+@with_user_lock
+async def act_shoot_menu_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if "match" not in data:
+        return await callback.answer("⏳ Матч уже завершен!", show_alert=True)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📐 Левый верхний (Девятка)", callback_data="shoot_dir:в левую девятку"), InlineKeyboardButton(text="📐 Правый верхний (Девятка)", callback_data="shoot_dir:в правую девятку")],
+        [InlineKeyboardButton(text="👇 Левый нижний", callback_data="shoot_dir:низом в левый угол"), InlineKeyboardButton(text="👇 Правый нижний", callback_data="shoot_dir:низом в правый угол")]
+    ])
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("shoot_dir:"))
+@with_user_lock
+async def act_shoot_execute_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if "match" not in data:
+        return await callback.answer("⏳ Матч уже завершен!", show_alert=True)
+    m = data["match"]
+    target_dir = callback.data.split(":")[1]
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+
+    rival_rating = CLUB_RATINGS.get(m["rival"], 50)
+    score_chance = 0.60 + ((p["rating"] - rival_rating) * 0.015)
+
+    gk_dive = random.choice(["в левую девятку", "в правую девятку", "низом в левый угол", "низом в правый угол"])
+
+    if gk_dive == target_dir:
+        score_chance -= 0.15
+        gk_guessed = True
+    else:
+        score_chance += 0.10
+        gk_guessed = False
+
+    score_chance = max(0.05, min(0.95, score_chance))
+
+    if random.random() < score_chance:
+        m["goals"] += 1; m["my_team_score"] += 1
+        try:
+            await callback.message.edit_text(
+                f"⚽ <b>{m['minute']}'</b> | ГОЛ! Твой шикарный удар {target_dir} разрывает сетку ворот!",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(2)
+        m["log"] += f"⚽ <b>{m['minute']}'</b> | ГОЛ! Твой шикарный удар {target_dir}!
+"
+    else:
+        if gk_guessed:
+            m["log"] += f"❌ <b>{m['minute']}'</b> | Ты пробил {target_dir}, но голкипер парировал удар!
+"
+        else:
+            m["log"] += f"❌ <b>{m['minute']}'</b> | Целился {target_dir}, но мяч пролетел мимо!
+"
+
+    m["current_moment"] += 1
+    await state.update_data(match=m)
+    await generate_moment(callback, state, user_id)
+
+@dp.callback_query(F.data == "act:pass")
+@with_user_lock
+async def act_pass_handler(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if "match" not in data:
+        return await callback.answer("⏳ Матч уже завершен!", show_alert=True)
+    m = data["match"]
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+
+    rival_rating = CLUB_RATINGS.get(m["rival"], 50)
+    pass_chance = 0.60 + ((p["rating"] - rival_rating) * 0.015)
+    pass_chance = max(0.05, min(0.95, pass_chance))
+
+    if random.random() < pass_chance:
+        m["assists"] += 1
+        m["my_team_score"] += 1
+        m["log"] += f"✅ <b>{m['minute']}'</b> | Шикарный точный пас на партнера, и он вколачивает мяч в сетку! ГОЛ!
+"
+    else:
+        m["log"] += f"❌ <b>{m['minute']}'</b> | Пас оказался неточным, перехват соперника.
+"
 
     m["current_moment"] += 1
     await state.update_data(match=m)
