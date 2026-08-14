@@ -14,7 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # --- НАСТРОЙКА ЛОГОВ И ТОКЕНА ---
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8494602735:AAFaDVdnMPb04VMF0NAr9VUT9g2n67nvE8g"  # Замените на ваш токен
+BOT_TOKEN = "8979310355:AAHAwTEzkj6crT8nr5GrxPKeHAoilhrrdZc"
 
 # Канал спонсора
 SPONSOR_CHANNEL_ID = "@jdoauqh"
@@ -214,7 +214,7 @@ CLUBS = {
         "Атлетико Паранаэнсе", "Гояс", "Спорт Ресифи", "Сеара", "Америка Минейро"
     ],
 
-    # ===== НИДЕРЛАНДЫ =====
+    # НИДЕРЛАНДЫ
     "Эрстедивизи": [
         "Йонг Аякс", "Йонг ПСВ", "Йонг Утрехт", "Ден Босх", "Камбюр", "Де Графсхап",
         "Дордрехт", "Эйндховен", "Эммен", "Гронинген", "Хелмонд Спорт", "Хераклес",
@@ -265,7 +265,7 @@ CLUB_RATINGS = {
     "Васко да Гама": 72, "Флуминенсе": 72, "Баия": 71, "Форталеза": 70, "Куяба": 69,
     "Атлетико Паранаэнсе": 70, "Гояс": 68, "Спорт Ресифи": 69, "Сеара": 68, "Америка Минейро": 67,
 
-    # ===== НИДЕРЛАНДЫ =====
+    # НИДЕРЛАНДЫ
     "Йонг Аякс": 58, "Йонг ПСВ": 56, "Йонг Утрехт": 52, "Ден Босх": 55, "Камбюр": 62, "Де Графсхап": 60,
     "Дордрехт": 54, "Эйндховен": 57, "Эммен": 63, "Гронинген": 66, "Хелмонд Спорт": 53, "Хераклес": 65,
     "Маастрихт": 56, "Осс": 51, "Рода": 59, "Телстар": 52, "Венло": 58, "Виллем II": 64, "Зволле": 63, "Алмере Сити": 55,
@@ -1203,7 +1203,7 @@ async def start_new_career_handler(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text("⚽ **Добро пожаловать обратно! Начнем заново!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
     await state.set_state(PlayerCreation.waiting_for_name)
 
-# ===== НОВОЕ: Подтверждение удаления карьеры =====
+# ===== Подтверждение удаления карьеры =====
 @dp.callback_query(F.data == "delete_career")
 @with_user_lock
 async def delete_career_confirm(callback: CallbackQuery):
@@ -1555,7 +1555,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # ===== НОВОЕ: Предложения из Нидерландов =====
+    # Предложения из Нидерландов
     if p["division"] not in ["Эредивизи", "Эрстедивизи"] and random.random() < 0.15:
         if current_rating >= 74:
             nl_offers = random.sample(CLUBS["Эредивизи"], 2)
