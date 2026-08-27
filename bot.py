@@ -665,6 +665,30 @@ def check_train_achievements(p: dict, train_count: int, streak: int) -> tuple:
     return unlocked, total_reward
 
 # ============================================================
+# ГЛАВНОЕ МЕНЮ (ДОЛЖНО БЫТЬ ДО ВСЕХ ОБРАБОТЧИКОВ)
+# ============================================================
+
+async def main_menu_keyboard(username: str = None, user_id: str = None):
+    match_btn_text = "🎮 Матч"
+    if user_id:
+        p = (await load_data(PLAYERS_FILE)).get(user_id)
+        if p and p.get("tour", 1) > 30:
+            match_btn_text = "🏁 Итоги сезона"
+                
+    kb = [
+        [InlineKeyboardButton(text="🏋️‍♂️ Тренировка", callback_data="menu_train_choice"), InlineKeyboardButton(text=match_btn_text, callback_data="menu_match")],
+        [InlineKeyboardButton(text="📊 Таблица", callback_data="menu_table"), InlineKeyboardButton(text="👤 Профиль", callback_data="menu_profile")],
+        [InlineKeyboardButton(text="🍷 Личная жизнь", callback_data="menu_personal_life"), InlineKeyboardButton(text="🏆 Зал Славы", callback_data="menu_leaderboard")],
+        [InlineKeyboardButton(text="🎯 Квесты", callback_data="menu_quests"), InlineKeyboardButton(text="💰 Спонсоры", callback_data="menu_sponsors")],
+        [InlineKeyboardButton(text="🟢 Онлайн / Топ", callback_data="menu_online")]
+    ]
+    
+    if username and username.replace("@", "") in ADMINS:
+        kb.append([InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")])
+        
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+# ============================================================
 # ОБРАБОТЧИКИ КОМАНД И КОЛБЭКОВ
 # ============================================================
 
@@ -2136,6 +2160,10 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     await msg.delete()
     await generate_moment(callback, state, user_id)
 
+# ============================================================
+# ФУНКЦИИ МАТЧА (generate_moment, gk_action_handler, cb_action_handler, и т.д.)
+# ============================================================
+
 async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
     if "match" not in data:
@@ -2854,6 +2882,10 @@ async def season_choice_handler(callback: CallbackQuery):
         if callback.message.photo: await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
+# ============================================================
+# ЗАПУСК БОТА
+# ============================================================
+
 async def main():
     print("🚀 Бот запущен и ожидает сообщений...")
     print("📌 Добавлена лига Бельгии (Jupiler Pro League) - 16 клубов")
@@ -2866,4 +2898,4 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main())    
