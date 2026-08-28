@@ -1868,7 +1868,7 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
     )
 
 # ============================================================
-# ИСПРАВЛЕННЫЙ ОБРАБОТЧИК МАТЧА (С СБРОСОМ СЕРИИ)
+# ИСПРАВЛЕННЫЙ ОБРАБОТЧИК МАТЧА (С СБРОСОМ СЕРИИ И ПРОВЕРКОЙ СТАТУСА)
 # ============================================================
 
 @dp.callback_query(F.data == "menu_match")
@@ -1883,20 +1883,59 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     p = players.get(user_id)
     if await deny_if_retired_cb(callback, p): return
     
-    # ========== НОВАЯ ЛОГИКА СБРОСА СЕРИИ ==========
-    # Если сыграл матч и не тренировался → сбрасываем серию
+    # ========== СБРОС СЕРИИ (ЕСЛИ НЕ ТРЕНИРОВАЛСЯ) ==========
     if p.get("train_done", False) == False:
-        # Игрок сыграл матч, но не тренировался - серия прервана!
         if p.get("train_streak", 0) > 0:
             p["train_streak"] = 0
-            # Отправляем уведомление о сбросе серии
             await callback.message.answer(
                 "⚠️ **СЕРИЯ ПРЕРВАНА!**\n"
                 "Ты сыграл матч, но не потренировался.\n"
                 "🔥 Серия тренировок сброшена до 0!",
                 parse_mode="Markdown"
             )
-    # ===============================================
+    # ========================================================
+    
+    # ========== ПРОВЕРКА СТАТУСА ==========
+    trust = p.get("trust", 15)
+    status = get_status_by_trust(trust)
+    
+    # Если игрок в резерве (trust < 21) → НЕ ИГРАЕТ
+    if trust < 21:
+        # Пропускаем матч, но даем уведомление
+        p["tour"] += 1
+        p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
+        p["train_done"] = False
+        p["fatigue"] = max(0, p.get("fatigue", 0) - 10)
+        
+        # Симулируем матч без участия игрока
+        played_rivals = p.get("played_league_rivals", [])
+        rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"] and c not in played_rivals]
+        if not rival_pool:
+            rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"]]
+            p["played_league_rivals"] = []
+        
+        rival = random.choice(rival_pool)
+        p["played_league_rivals"].append(rival)
+        outcome = random.choice(["win", "draw", "loss"])
+        
+        p["stats_season"]["games"] += 1
+        
+        players[user_id] = p
+        await save_data(PLAYERS_FILE, players)
+        await simulate_table_tour(user_id, p["division"], p["club"], rival, outcome)
+        
+        if callback.message.photo:
+            await callback.message.delete()
+        
+        return await callback.message.answer(
+            f"🪑 **ТЫ В РЕЗЕРВЕ!**\n"
+            f"Ты не попал в состав на матч против **{rival}**.\n"
+            f"📊 Статус: {status}\n"
+            f"💡 Подними доверие (trust) до 21, чтобы играть!\n"
+            f"🔹 Итог матча: **{'Победа' if outcome=='win' else 'Ничья' if outcome=='draw' else 'Поражение'}**",
+            parse_mode="Markdown",
+            reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
+        )
     
     if p.get("fatigue", 0) >= 95:
         return await callback.answer("🚫 Ты смертельно устал! Сходи в ресторан.", show_alert=True)
@@ -1946,6 +1985,20 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 return await callback.message.answer(msg, parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id))
     
     current_rating = p.get("rating", 40)
+    
+    # ========== ЕСЛИ ИГРОК НА ЗАМЕНЕ (21-50) ==========
+    if trust < 51:
+        total_moments = random.randint(1, 2)  # Меньше моментов
+        await callback.message.answer(
+            f"🔄 **ТЫ НА ЗАМЕНЕ!**\n"
+            f"Ты выйдешь на поле во втором тайме.\n"
+            f"📊 Статус: {status}\n"
+            f"💡 Играй лучше, чтобы попасть в старт!",
+            parse_mode="Markdown"
+        )
+    else:
+        total_moments = random.randint(2, 4)  # Полноценный матч
+    # ==========================================
     
     # Предложения из Германии
     if p["division"] not in ["Бундеслига", "Вторая Бундеслига"] and random.random() < 0.15:
@@ -2160,7 +2213,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         
     match_data = {
         "rival": random.choice(rival_pool),
-        "total_moments": random.randint(1, 4),
+        "total_moments": total_moments,  # Используем количество моментов в зависимости от статуса
         "current_moment": 1,
         "minute": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0, "yellow_cards": 0,
         "my_team_score": 0, "rival_team_score": 0,
