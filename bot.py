@@ -1867,6 +1867,10 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
     )
 
+# ============================================================
+# ИСПРАВЛЕННЫЙ ОБРАБОТЧИК МАТЧА (С СБРОСОМ СЕРИИ)
+# ============================================================
+
 @dp.callback_query(F.data == "menu_match")
 @with_user_lock
 async def match_handler(callback: CallbackQuery, state: FSMContext):
@@ -1878,6 +1882,21 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
     if await deny_if_retired_cb(callback, p): return
+    
+    # ========== НОВАЯ ЛОГИКА СБРОСА СЕРИИ ==========
+    # Если сыграл матч и не тренировался → сбрасываем серию
+    if p.get("train_done", False) == False:
+        # Игрок сыграл матч, но не тренировался - серия прервана!
+        if p.get("train_streak", 0) > 0:
+            p["train_streak"] = 0
+            # Отправляем уведомление о сбросе серии
+            await callback.message.answer(
+                "⚠️ **СЕРИЯ ПРЕРВАНА!**\n"
+                "Ты сыграл матч, но не потренировался.\n"
+                "🔥 Серия тренировок сброшена до 0!",
+                parse_mode="Markdown"
+            )
+    # ===============================================
     
     if p.get("fatigue", 0) >= 95:
         return await callback.answer("🚫 Ты смертельно устал! Сходи в ресторан.", show_alert=True)
@@ -2161,7 +2180,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     await generate_moment(callback, state, user_id)
 
 # ============================================================
-# ФУНКЦИИ МАТЧА (generate_moment, gk_action_handler, cb_action_handler, и т.д.)
+# ФУНКЦИИ МАТЧА (generate_moment, gk_action_handler, cb_action_handler, act_shoot_menu_handler, act_shoot_execute_handler, act_pass_handler, start_penalty_shootout, finish_match, season_results_handler, _apply_new_season_reset, season_choice_handler)
 # ============================================================
 
 async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
@@ -2894,8 +2913,9 @@ async def main():
     print("📌 Добавлена лига Казахстана (1 дивизион - Премьер-лига) - 16 клубов")
     print("📌 Новая система тренировок: выбор направления, серии, достижения!")
     print("📌 Исправлен статус игрока - теперь влияет на игровое время!")
+    print("📌 Исправлен баг: серия тренировок сбрасывается, если не тренироваться после матча!")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())    
+    asyncio.run(main())
