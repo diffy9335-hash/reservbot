@@ -14,7 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # --- НАСТРОЙКА ЛОГОВ И ТОКЕНА ---
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8979310355:AAHAwTEzkj6crT8nr5GrxPKeHAoilhrrdZc"
+BOT_TOKEN = "8979310355:AAFgfltGjZIWd41bRDJgCjMpNMEj5GfDvQY"
 
 SPONSOR_CHANNEL_ID = "@jdoauqh"
 SPONSOR_CHANNEL_URL = "https://t.me/jdoauqh"
@@ -370,23 +370,23 @@ POSITIONS = {
     "🧤 Вратарь": "GK"
 }
 
-# --- КВЕСТЫ (ДОСТИЖЕНИЯ) ---
+# --- КВЕСТЫ ---
 QUESTS_DATA = {
-    "q1": {"name": "Первая кровь", "desc": "Забить 1 гол", "reward": 0.1, "type": "goals", "target": 1},
-    "q2": {"name": "Бомбардир", "desc": "Забить 10 голов", "reward": 0.2, "type": "goals", "target": 10},
-    "q3": {"name": "Снайпер", "desc": "Забить 50 голов", "reward": 0.5, "type": "goals", "target": 50},
-    "q4": {"name": "Легендарный голеадор", "desc": "Забить 100 голов", "reward": 1.0, "type": "goals", "target": 100},
-    "q5": {"name": "Первый ассист", "desc": "Отдать 1 голевой пас", "reward": 0.1, "type": "assists", "target": 1},
-    "q6": {"name": "Командный игрок", "desc": "Отдать 20 ассистов", "reward": 0.3, "type": "assists", "target": 20},
-    "q7": {"name": "Маэстро паса", "desc": "Отдать 50 ассистов", "reward": 0.6, "type": "assists", "target": 50},
-    "q8": {"name": "Надежный щит", "desc": "10 отборов/сейвов", "reward": 0.2, "type": "def", "target": 10},
-    "q9": {"name": "Министр обороны", "desc": "50 отборов/сейвов", "reward": 0.5, "type": "def", "target": 50},
-    "q10": {"name": "Стена", "desc": "150 отборов/сейвов", "reward": 1.0, "type": "def", "target": 150},
-    "q11": {"name": "Вкус победы", "desc": "Выиграть 1 трофей", "reward": 0.3, "type": "trophies", "target": 1},
-    "q12": {"name": "Коллекционер", "desc": "Выиграть 3 трофея", "reward": 0.8, "type": "trophies", "target": 3},
-    "q13": {"name": "Опытный", "desc": "Сыграть 50 матчей", "reward": 0.3, "type": "games", "target": 50},
-    "q14": {"name": "Ветеран", "desc": "Сыграть 150 матчей", "reward": 0.8, "type": "games", "target": 150},
-    "q15": {"name": "Миллионер", "desc": "Накопить 1,000,000$", "reward": 1.0, "type": "money", "target": 1000000}
+    "q1": {"name": "Первая кровь", "desc": "Забить 1 гол", "reward": 0.05, "type": "goals", "target": 1},
+    "q2": {"name": "Бомбардир", "desc": "Забить 10 голов", "reward": 0.08, "type": "goals", "target": 10},
+    "q3": {"name": "Снайпер", "desc": "Забить 50 голов", "reward": 0.15, "type": "goals", "target": 50},
+    "q4": {"name": "Легендарный голеадор", "desc": "Забить 100 голов", "reward": 0.3, "type": "goals", "target": 100},
+    "q5": {"name": "Первый ассист", "desc": "Отдать 1 голевой пас", "reward": 0.05, "type": "assists", "target": 1},
+    "q6": {"name": "Командный игрок", "desc": "Отдать 20 ассистов", "reward": 0.08, "type": "assists", "target": 20},
+    "q7": {"name": "Маэстро паса", "desc": "Отдать 50 ассистов", "reward": 0.15, "type": "assists", "target": 50},
+    "q8": {"name": "Надежный щит", "desc": "10 отборов/сейвов", "reward": 0.05, "type": "def", "target": 10},
+    "q9": {"name": "Министр обороны", "desc": "50 отборов/сейвов", "reward": 0.15, "type": "def", "target": 50},
+    "q10": {"name": "Стена", "desc": "150 отборов/сейвов", "reward": 0.3, "type": "def", "target": 150},
+    "q11": {"name": "Вкус победы", "desc": "Выиграть 1 трофей", "reward": 0.1, "type": "trophies", "target": 1},
+    "q12": {"name": "Коллекционер", "desc": "Выиграть 3 трофея", "reward": 0.25, "type": "trophies", "target": 3},
+    "q13": {"name": "Опытный", "desc": "Сыграть 50 матчей", "reward": 0.1, "type": "games", "target": 50},
+    "q14": {"name": "Ветеран", "desc": "Сыграть 150 матчей", "reward": 0.25, "type": "games", "target": 150},
+    "q15": {"name": "Миллионер", "desc": "Накопить 1,000,000$", "reward": 0.3, "type": "money", "target": 1000000}
 }
 
 def get_quest_progress(p, q_type):
@@ -429,7 +429,6 @@ def get_ladder(division):
     return [division]
 
 def get_status_by_trust(trust):
-    """Статус игрока в зависимости от доверия болельщиков"""
     if 0 <= trust <= 20:
         return "Глубокий резерв ❌"
     elif 21 <= trust <= 50:
@@ -575,57 +574,50 @@ async def simulate_background_division(user_id, division):
         tables[user_id][division] = sorted(table, key=lambda x: x["points"], reverse=True)
         await save_data(TABLES_FILE, tables)
 
-# ========== НОВАЯ СИСТЕМА ТРЕНИРОВОК ==========
-
-# Конфиг тренировок для каждой позиции
+# ========== ТРЕНИРОВКИ ==========
 TRAINING_CONFIG = {
     "ST": {
-        "tech": {"name": "Дриблинг", "base_gain": 0.1, "fatigue": 15},
-        "phys": {"name": "Скорость", "base_gain": 0.1, "fatigue": 15},
-        "special": {"name": "Завершение", "base_gain": 0.15, "fatigue": 18}
+        "tech": {"name": "Дриблинг", "base_gain": 0.05, "fatigue": 15},
+        "phys": {"name": "Скорость", "base_gain": 0.05, "fatigue": 15},
+        "special": {"name": "Завершение", "base_gain": 0.08, "fatigue": 18}
     },
     "CM": {
-        "tech": {"name": "Пас", "base_gain": 0.1, "fatigue": 15},
-        "phys": {"name": "Выносливость", "base_gain": 0.1, "fatigue": 15},
-        "special": {"name": "Видение поля", "base_gain": 0.15, "fatigue": 18}
+        "tech": {"name": "Пас", "base_gain": 0.05, "fatigue": 15},
+        "phys": {"name": "Выносливость", "base_gain": 0.05, "fatigue": 15},
+        "special": {"name": "Видение поля", "base_gain": 0.08, "fatigue": 18}
     },
     "CB": {
-        "tech": {"name": "Отбор", "base_gain": 0.1, "fatigue": 15},
-        "phys": {"name": "Сила", "base_gain": 0.1, "fatigue": 15},
-        "special": {"name": "Позиция", "base_gain": 0.15, "fatigue": 18}
+        "tech": {"name": "Отбор", "base_gain": 0.05, "fatigue": 15},
+        "phys": {"name": "Сила", "base_gain": 0.05, "fatigue": 15},
+        "special": {"name": "Позиция", "base_gain": 0.08, "fatigue": 18}
     },
     "GK": {
-        "tech": {"name": "Реакция", "base_gain": 0.1, "fatigue": 15},
-        "phys": {"name": "Прыжок", "base_gain": 0.1, "fatigue": 15},
-        "special": {"name": "Игра ногами", "base_gain": 0.15, "fatigue": 18}
+        "tech": {"name": "Реакция", "base_gain": 0.05, "fatigue": 15},
+        "phys": {"name": "Прыжок", "base_gain": 0.05, "fatigue": 15},
+        "special": {"name": "Игра ногами", "base_gain": 0.08, "fatigue": 18}
     }
 }
 
-# Бонусы за серию тренировок
 STREAK_BONUSES = {
-    3: 0.2,
-    5: 0.4,
-    10: 0.8,
-    15: 1.2,
-    20: 1.5
+    5: 0.1,
+    10: 0.2,
+    15: 0.3,
+    20: 0.5
 }
 
-# Достижения за тренировки
 TRAIN_ACHIEVEMENTS = {
-    "train_25": {"name": "🏅 Трудяга", "desc": "25 тренировок", "reward": 0.3},
-    "train_50": {"name": "🏅 Профи", "desc": "50 тренировок", "reward": 0.5},
-    "train_100": {"name": "🏅 Легенда тренировок", "desc": "100 тренировок", "reward": 0.8},
-    "streak_5": {"name": "🔥 Дисциплина", "desc": "5 тренировок подряд", "reward": 0.3},
-    "streak_10": {"name": "🔥 Железная воля", "desc": "10 тренировок подряд", "reward": 0.5},
-    "streak_20": {"name": "🔥 Монах", "desc": "20 тренировок подряд", "reward": 0.8},
+    "train_25": {"name": "🏅 Трудяга", "desc": "25 тренировок", "reward": 0.1},
+    "train_50": {"name": "🏅 Профи", "desc": "50 тренировок", "reward": 0.2},
+    "train_100": {"name": "🏅 Легенда тренировок", "desc": "100 тренировок", "reward": 0.3},
+    "streak_5": {"name": "🔥 Дисциплина", "desc": "5 тренировок подряд", "reward": 0.1},
+    "streak_10": {"name": "🔥 Железная воля", "desc": "10 тренировок подряд", "reward": 0.2},
+    "streak_20": {"name": "🔥 Монах", "desc": "20 тренировок подряд", "reward": 0.3},
 }
 
 def get_train_cost(rating: float) -> int:
-    """Стоимость тренировки зависит от рейтинга"""
     return int(200 + (rating * 5))
 
 def get_streak_bonus(streak: int) -> float:
-    """Получить бонус за серию"""
     bonus = 0.0
     for s, b in sorted(STREAK_BONUSES.items()):
         if streak >= s:
@@ -633,7 +625,6 @@ def get_streak_bonus(streak: int) -> float:
     return bonus
 
 def check_train_achievements(p: dict, train_count: int, streak: int) -> tuple:
-    """Проверить достижения за тренировки"""
     unlocked = []
     total_reward = 0.0
     
@@ -664,10 +655,23 @@ def check_train_achievements(p: dict, train_count: int, streak: int) -> tuple:
     
     return unlocked, total_reward
 
-# ============================================================
-# ГЛАВНОЕ МЕНЮ (ДОЛЖНО БЫТЬ ДО ВСЕХ ОБРАБОТЧИКОВ)
-# ============================================================
+# ========== ФУНКЦИЯ ЛЕЧЕНИЯ ТРАВМ ==========
+async def heal_injury_if_needed(user_id: str):
+    """Проверяет травму и лечит если пора (уменьшает на 1 каждый вызов)"""
+    players = await load_data(PLAYERS_FILE)
+    p = players.get(user_id)
+    if not p:
+        return
+    
+    if p.get("injury_tours", 0) > 0:
+        p["injury_tours"] -= 1
+        if p["injury_tours"] <= 0:
+            p["is_injured"] = False
+            p["injury_tours"] = 0
+        players[user_id] = p
+        await save_data(PLAYERS_FILE, players)
 
+# ========== ГЛАВНОЕ МЕНЮ ==========
 async def main_menu_keyboard(username: str = None, user_id: str = None):
     match_btn_text = "🎮 Матч"
     if user_id:
@@ -689,7 +693,7 @@ async def main_menu_keyboard(username: str = None, user_id: str = None):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 # ============================================================
-# ОБРАБОТЧИКИ КОМАНД И КОЛБЭКОВ
+# ОБРАБОТЧИКИ
 # ============================================================
 
 @dp.callback_query(F.data == "menu_online")
@@ -1408,7 +1412,8 @@ async def process_club(callback: CallbackQuery, state: FSMContext):
         "car": None,
         "has_yoga_bonus": False,
         "last_interview_tour": 0,
-        "rating_performance": 0
+        "rating_performance": 0,
+        "age_penalty_applied": False
     }
     
     players = await load_data(PLAYERS_FILE)
@@ -1484,7 +1489,7 @@ async def delete_career_final(callback: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
 
-# ========== НОВЫЙ ОБРАБОТЧИК ТРЕНИРОВОК ==========
+# ========== ТРЕНИРОВКИ (С ПРИРОСТОМ TRUST) ==========
 
 @dp.callback_query(F.data == "menu_train_choice")
 @with_user_lock
@@ -1494,15 +1499,12 @@ async def train_choice_handler(callback: CallbackQuery):
     p = (await load_data(PLAYERS_FILE)).get(user_id)
     if await deny_if_retired_cb(callback, p): return
     
-    # Проверка: травма
     if p.get("injury_tours", 0) > 0:
         return await callback.answer(f"🚑 Вы травмированы! Осталось лечиться туров: {p['injury_tours']}.", show_alert=True)
     
-    # Проверка: можно тренироваться только после матча
     if p.get("train_done", False):
         return await callback.answer("🚫 Сыграй матч, чтобы открыть тренировку.", show_alert=True)
     
-    # Проверка: усталость
     fatigue = p.get("fatigue", 0)
     if fatigue >= 70:
         return await callback.answer(
@@ -1510,7 +1512,6 @@ async def train_choice_handler(callback: CallbackQuery):
             show_alert=True
         )
     
-    # Проверка: деньги
     cost = get_train_cost(p.get("rating", 40))
     if p.get("money", 0) < cost:
         return await callback.answer(f"❌ Не хватает денег! Нужно {cost}$, у тебя {p.get('money', 0)}$", show_alert=True)
@@ -1556,9 +1557,8 @@ async def train_execute_handler(callback: CallbackQuery):
     p = players.get(user_id)
     if await deny_if_retired_cb(callback, p): return
     
-    train_type = callback.data.split(":")[1]  # tech, phys, special
+    train_type = callback.data.split(":")[1]
     
-    # Проверки
     if p.get("injury_tours", 0) > 0:
         return await callback.answer("🚑 Вы травмированы! Тренировка недоступна.", show_alert=True)
     
@@ -1577,33 +1577,27 @@ async def train_execute_handler(callback: CallbackQuery):
     config = TRAINING_CONFIG.get(position, TRAINING_CONFIG["ST"])
     train_data = config.get(train_type, config["tech"])
     
-    # База
     gain = train_data["base_gain"]
     
-    # Бонус за серию
     streak = p.get("train_streak", 0)
     streak_bonus = get_streak_bonus(streak)
     total_gain = gain + streak_bonus
     
-    # Золотая тренировка (5%)
     golden = False
     if random.random() < 0.05:
         total_gain *= 2
         golden = True
     
-    # Провал (3%)
     failed = False
     if random.random() < 0.03:
         total_gain = -0.2
         failed = True
     
-    # Вдохновение (8%)
     inspiration = False
     if random.random() < 0.08:
         inspiration = True
     
-    # Травма (зависит от усталости)
-    injury_chance = 0.02 + (fatigue / 100) * 0.05  # 2-7%
+    injury_chance = 0.02 + (fatigue / 100) * 0.05
     injured = False
     injury_tours = 0
     
@@ -1612,29 +1606,27 @@ async def train_execute_handler(callback: CallbackQuery):
         injury_tours = random.randint(1, 3)
         p["injury_tours"] = injury_tours
         p["is_injured"] = True
-        total_gain -= 0.5  # Штраф за травму
+        total_gain -= 0.5
     
-    # Применяем изменения
+    # ========== ПРИМЕНЯЕМ ИЗМЕНЕНИЯ С ПРИРОСТОМ TRUST ==========
     p["train_done"] = True
     p["fatigue"] = min(100, p.get("fatigue", 0) + train_data["fatigue"])
     p["money"] -= cost
     p["train_streak"] = streak + 1
     p["train_count"] = p.get("train_count", 0) + 1
+    p["trust"] = min(100, p.get("trust", 15) + 3)  # <--- ПРИРОСТ TRUST
+    # ===========================================================
     
-    # Статистика по типам
     p[f"train_{train_type}_count"] = p.get(f"train_{train_type}_count", 0) + 1
     
-    # Вдохновение снижает усталость
     if inspiration:
         p["fatigue"] = max(0, p["fatigue"] - 5)
     
-    # Применяем прирост рейтинга
     if not injured:
         p["rating"] = max(1.0, min(100.0, round(p["rating"] + total_gain, 1)))
     else:
         p["rating"] = max(1.0, min(100.0, round(p["rating"] + total_gain, 1)))
     
-    # Проверка достижений
     new_achievements, ach_reward = check_train_achievements(
         p, 
         p.get("train_count", 0), 
@@ -1651,14 +1643,12 @@ async def train_execute_handler(callback: CallbackQuery):
                     break
         p["train_achievements"] = train_achievements
     
-    # Репутация
     p["reputation"] = min(100, p.get("reputation", 50) + 0.5)
     
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
     await callback.message.delete()
     
-    # Формируем сообщение
     msg_lines = ["💪 **ТРЕНИРОВКА ЗАВЕРШЕНА!**", "━━━━━━━━━━━━━━━━━━━━"]
     msg_lines.append(f"📋 Направление: **{train_data['name']}**")
     
@@ -1678,6 +1668,7 @@ async def train_execute_handler(callback: CallbackQuery):
     
     msg_lines.append("━━━━━━━━━━━━━━━━━━━━")
     msg_lines.append(f"⚡ Рейтинг: **{p['rating']}**")
+    msg_lines.append(f"❤️ Доверие: **{p['trust']}**")
     msg_lines.append(f"🔋 Усталость: **{p['fatigue']}%**")
     msg_lines.append(f"💰 Потрачено: **{cost}$**")
     msg_lines.append(f"💵 Баланс: **{p['money']}$**")
@@ -1786,7 +1777,6 @@ async def profile_handler(callback: CallbackQuery):
     kb = await main_menu_keyboard(callback.from_user.username, user_id)
     kb.inline_keyboard.append([InlineKeyboardButton(text="🗑 Удалить карьеру", callback_data="delete_career")])
 
-    # Статистика тренировок
     train_stats = (
         f"\n📊 **Тренировки:**\n"
         f"🔥 Серия: {p.get('train_streak', 0)}\n"
@@ -1867,9 +1857,7 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
     )
 
-# ============================================================
-# ИСПРАВЛЕННЫЙ ОБРАБОТЧИК МАТЧА (С СБРОСОМ СЕРИИ И ПРОВЕРКОЙ СТАТУСА)
-# ============================================================
+# ========== ИСПРАВЛЕННЫЙ match_handler (С ЛЕЧЕНИЕМ ТРАВМ) ==========
 
 @dp.callback_query(F.data == "menu_match")
 @with_user_lock
@@ -1878,12 +1866,17 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         return await callback.message.answer("❗️ **Для игры необходимо подписаться на нашего спонсора!**\nСначала подпишитесь, а затем продолжите игру.", reply_markup=sub_keyboard(), parse_mode="Markdown")
 
     user_id = await get_uid(callback)
+    
+    # ========== ЛЕЧИМ ТРАВМУ ==========
+    await heal_injury_if_needed(user_id)
+    # ==================================
+    
     await track_activity(user_id)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
     if await deny_if_retired_cb(callback, p): return
     
-    # ========== СБРОС СЕРИИ (ЕСЛИ НЕ ТРЕНИРОВАЛСЯ) ==========
+    # ========== СБРОС СЕРИИ ==========
     if p.get("train_done", False) == False:
         if p.get("train_streak", 0) > 0:
             p["train_streak"] = 0
@@ -1893,21 +1886,18 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 "🔥 Серия тренировок сброшена до 0!",
                 parse_mode="Markdown"
             )
-    # ========================================================
+    # ==================================
     
-    # ========== ПРОВЕРКА СТАТУСА ==========
     trust = p.get("trust", 15)
     status = get_status_by_trust(trust)
     
-    # Если игрок в резерве (trust < 21) → НЕ ИГРАЕТ
+    # ========== РЕЗЕРВ (trust < 21) ==========
     if trust < 21:
-        # Пропускаем матч, но даем уведомление
         p["tour"] += 1
         p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
         p["train_done"] = False
         p["fatigue"] = max(0, p.get("fatigue", 0) - 10)
         
-        # Симулируем матч без участия игрока
         played_rivals = p.get("played_league_rivals", [])
         rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"] and c not in played_rivals]
         if not rival_pool:
@@ -1936,15 +1926,10 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             parse_mode="Markdown",
             reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
         )
+    # ===========================================
     
-    if p.get("fatigue", 0) >= 95:
-        return await callback.answer("🚫 Ты смертельно устал! Сходи в ресторан.", show_alert=True)
-        
+    # ========== ТРАВМА ==========
     if p.get("injury_tours", 0) > 0:
-        p["injury_tours"] -= 1
-        if p["injury_tours"] == 0:
-            p["is_injured"] = False
-        
         p["tour"] += 1
         p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
         p["train_done"] = False
@@ -1955,40 +1940,37 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         if not rival_pool:
             rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"]]
             p["played_league_rivals"] = []
-            
+        
         rival = random.choice(rival_pool)
         p["played_league_rivals"].append(rival)
         outcome = random.choice(["win", "draw", "loss"])
         
+        p["stats_season"]["games"] += 1
+        
         players[user_id] = p
         await save_data(PLAYERS_FILE, players)
-        
         await simulate_table_tour(user_id, p["division"], p["club"], rival, outcome)
-        if p.get("on_loan") and p.get("parent_club"):
-            parent_div = get_division(p["parent_club"])
-            if parent_div != p["division"]:
-                await simulate_background_division(user_id, parent_div)
-                
-        msg = f"🚑 **ТЫ ПРОПУСТИЛ ТУР ИЗ-ЗА ТРАВМЫ**\nКоманда сыграла против **{rival}**. Итог для твоего клуба: **{'Победа' if outcome=='win' else 'Ничья' if outcome=='draw' else 'Поражение'}**.\n"
-        if p["injury_tours"] > 0:
-            msg += f"Осталось лечиться туров: {p['injury_tours']}."
-        else:
-            msg += "✅ **Ты полностью восстановился и готов к следующему матчу!**"
-            
+        
         if callback.message.photo:
             await callback.message.delete()
-            return await callback.message.answer(msg, parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id))
+        
+        msg = f"🚑 **ТЫ ПРОПУСТИЛ ТУР ИЗ-ЗА ТРАВМЫ**\nКоманда сыграла против **{rival}**. Итог: **{'Победа' if outcome=='win' else 'Ничья' if outcome=='draw' else 'Поражение'}**.\n"
+        if p["injury_tours"] > 0:
+            msg += f"⏳ Осталось лечиться: {p['injury_tours']} тур(а)."
         else:
-            try:
-                return await callback.message.edit_text(msg, parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id))
-            except Exception:
-                return await callback.message.answer(msg, parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id))
+            msg += "✅ **Ты полностью восстановился и готов к следующему матчу!**"
+        
+        return await callback.message.answer(msg, parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id))
+    # ================================
+    
+    if p.get("fatigue", 0) >= 95:
+        return await callback.answer("🚫 Ты смертельно устал! Сходи в ресторан.", show_alert=True)
     
     current_rating = p.get("rating", 40)
     
-    # ========== ЕСЛИ ИГРОК НА ЗАМЕНЕ (21-50) ==========
+    # ========== ЗАМЕНА (21-50) ==========
     if trust < 51:
-        total_moments = random.randint(1, 2)  # Меньше моментов
+        total_moments = random.randint(1, 2)
         await callback.message.answer(
             f"🔄 **ТЫ НА ЗАМЕНЕ!**\n"
             f"Ты выйдешь на поле во втором тайме.\n"
@@ -1997,8 +1979,8 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             parse_mode="Markdown"
         )
     else:
-        total_moments = random.randint(2, 4)  # Полноценный матч
-    # ==========================================
+        total_moments = random.randint(2, 4)
+    # ====================================
     
     # Предложения из Германии
     if p["division"] not in ["Бундеслига", "Вторая Бундеслига"] and random.random() < 0.15:
@@ -2213,7 +2195,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         
     match_data = {
         "rival": random.choice(rival_pool),
-        "total_moments": total_moments,  # Используем количество моментов в зависимости от статуса
+        "total_moments": total_moments,
         "current_moment": 1,
         "minute": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0, "yellow_cards": 0,
         "my_team_score": 0, "rival_team_score": 0,
@@ -2232,9 +2214,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     await msg.delete()
     await generate_moment(callback, state, user_id)
 
-# ============================================================
-# ФУНКЦИИ МАТЧА (generate_moment, gk_action_handler, cb_action_handler, act_shoot_menu_handler, act_shoot_execute_handler, act_pass_handler, start_penalty_shootout, finish_match, season_results_handler, _apply_new_season_reset, season_choice_handler)
-# ============================================================
+# ========== ФУНКЦИИ МАТЧА ==========
 
 async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
@@ -2578,7 +2558,9 @@ async def finish_match(callback: CallbackQuery, state: FSMContext, user_id: str,
            - conceded * 0.10
            + (0.20 if outcome == "win" else (-0.15 if outcome == "loss" else 0.0)))
     raw = max(-1.0, min(1.0, raw))
-    rating_delta = round(raw * 0.15, 2)
+    
+    rating_delta = round(raw * 0.06, 2)
+
     p["rating"] = round(max(1.0, min(100.0, p.get("rating", 40.0) + rating_delta)), 2)
 
     money_gain = p.get("contract_salary", 1500)
@@ -2600,7 +2582,7 @@ async def finish_match(callback: CallbackQuery, state: FSMContext, user_id: str,
             if idx == len(stages) - 1:
                 p["trophies"] = p.get("trophies", []) + [f"🏆 Кубок сезона {p.get('season', 1)}"]
                 p["money"] += 100000
-                p["rating"] = max(1.0, min(100.0, round(p["rating"] + 2, 1)))
+                p["rating"] = max(1.0, min(100.0, round(p["rating"] + 0.5, 1)))
                 p["cup_out"] = True
                 cup_summary = "\n\n🏆 **ТЫ ВЫИГРАЛ НАЦИОНАЛЬНЫЙ КУБОК!!!** 🎉"
             else:
@@ -2617,6 +2599,14 @@ async def finish_match(callback: CallbackQuery, state: FSMContext, user_id: str,
             parent_div = get_division(p["parent_club"])
             if parent_div != p["division"]:
                 await simulate_background_division(user_id, parent_div)
+
+    age = p.get("age", 17)
+    if age >= 36:
+        p["rating"] = max(1.0, round(p["rating"] - 0.3, 1))
+    elif age >= 33:
+        p["rating"] = max(1.0, round(p["rating"] - 0.2, 1))
+    elif age >= 30:
+        p["rating"] = max(1.0, round(p["rating"] - 0.1, 1))
 
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
@@ -2954,9 +2944,7 @@ async def season_choice_handler(callback: CallbackQuery):
         if callback.message.photo: await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
-# ============================================================
-# ЗАПУСК БОТА
-# ============================================================
+# ========== ЗАПУСК ==========
 
 async def main():
     print("🚀 Бот запущен и ожидает сообщений...")
@@ -2967,6 +2955,8 @@ async def main():
     print("📌 Новая система тренировок: выбор направления, серии, достижения!")
     print("📌 Исправлен статус игрока - теперь влияет на игровое время!")
     print("📌 Исправлен баг: серия тренировок сбрасывается, если не тренироваться после матча!")
+    print("📌 ИСПРАВЛЕНО: тренировки дают +3 к доверию (trust)!")
+    print("📌 ИСПРАВЛЕНО: травмы теперь правильно проходят (уменьшаются каждый тур)!")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
