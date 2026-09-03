@@ -14,7 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # --- НАСТРОЙКА ЛОГОВ И ТОКЕНА ---
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8494602735:AAEKVgFhHOjgBe6157-LttnzYwWA29gwSOM"
+BOT_TOKEN = "8979310355:AAFgfltGjZIWd41bRDJgCjMpNMEj5GfDvQY"
 
 SPONSOR_CHANNEL_ID = "@jdoauqh"
 SPONSOR_CHANNEL_URL = "https://t.me/jdoauqh"
@@ -28,6 +28,7 @@ PLAYERS_FILE = "players.json"
 LEADERBOARD_FILE = "leaderboard.json"
 TABLES_FILE = "tables.json"
 SLOTS_FILE = "slots.json"
+EURO_FILE = "euro_qualification.json"
 
 def _load_data_sync(filename):
     if os.path.exists(filename):
@@ -159,6 +160,9 @@ class AdminPanel(StatesGroup):
 class InterviewState(StatesGroup):
     waiting_for_answer = State()
 
+class EuroMatch(StatesGroup):
+    waiting_for_action = State()
+
 # --- ДАННЫЕ И СПРАВОЧНИКИ ---
 EURO_NATIONS = [
     "Россия", "Франция", "Италия", "Испания", "Германия", "Англия",
@@ -169,185 +173,79 @@ EURO_NATIONS = [
 NATIONS = EURO_NATIONS
 
 CLUBS = {
-    # РОССИЯ
     "ФНЛ 2": ["Знамя Труда", "Сатурн Раменское", "Коломна", "Зенит-2", "Спартак-2", "Амкар Пермь", "Динамо Киров", "Рубин-2", "Торпедо Владимир", "Тверь", "Химик Дзержинск", "Иркутск"],
     "ФНЛ": ["Черноморец", "Шинник", "Урал", "Сочи", "Балтика", "Родина", "Торпедо М", "Арсенал Тула", "КАМАЗ", "Енисей", "Нефтехимик", "СКА-Хабаровск", "Уфа", "Тюмень", "Ротор", "Сокол", "Чайка", "Алания"],
     "РПЛ": ["Зенит", "Краснодар", "Динамо М", "Локомотив", "Спартак", "ЦСКА", "Ростов", "Рубин", "Крылья Советов", "Ахмат", "Факел", "Оренбург", "Пари НН", "Химки", "Акрон", "Динамо Мх"],
-    
-    # ФРАНЦИЯ
     "Насьональ": ["Ред Стар", "Ним", "Дижон", "Сошо", "Руан", "Ле Ман", "Версаль", "Нанси", "Шатору", "Кевийи", "Орлеан", "Булонь"],
     "Лига 2": ["Пари ФК", "Кан", "Генгам", "Амьен", "Бастия", "Бордо", "Труа", "Мец", "Аяччо", "Лорьян", "Клермон", "Анси", "Гренобль", "Дюнкерк", "По", "Родез", "Лаваль", "Ньор"],
     "Лига 1": ["ПСЖ", "Монако", "Брест", "Лилль", "Ницца", "Лион", "Ланс", "Марсель", "Ренн", "Реймс", "Тулуза", "Монпелье", "Страсбур", "Нант", "Гавр", "Осер", "Анже", "Сент-Этьен"],
-    
-    # АНГЛИЯ
     "Первая лига Англии": ["Рединг", "Уиган", "Болтон", "Чарльтон", "Барнсли", "Питерборо", "Блэкпул", "Портсмут", "Дерби Каунти", "Стивенедж", "Линкольн", "Шрусбери"],
     "Чемпионшип": ["Лестер", "Лидс", "Саутгемптон", "Ипсвич", "Вест Бромвич", "Норвич", "Халл Сити", "Ковентри", "Престон", "Мидлсбро", "Кардифф", "Бристоль Сити", "Сандерленд", "Суонси", "Уотфорд", "Миллуолл", "КПР", "Блэкберн"],
     "АПЛ": ["Манчестер Сити", "Арсенал", "Ливерпуль", "Астон Вилла", "Тоттенхэм", "Челси", "Ньюкасл", "Манчестер Юнайтед", "Вест Хэм", "Борнмут", "Кристал Пэлас", "Брайтон", "Фулхэм", "Вулверхэмптон", "Эвертон", "Брентфорд", "Ноттингем Форест", "Шеффилд Юнайтед"],
-
-    # ИСПАНИЯ
     "Сегунда": ["Эспаньол", "Сарагоса", "Леванте", "Эйбар", "Спортинг Хихон", "Вальядолид", "Тенерифе", "Овьедо", "Расинг", "Альбасете", "Картахена", "Бургос"],
     "Ла Лига": ["Реал Мадрид", "Барселона", "Атлетико", "Жирона", "Атлетик", "Реал Сосьедад", "Бетис", "Вильярреал", "Валенсия", "Алавес", "Осасуна", "Хетафе", "Сельта", "Севилья", "Мальорка", "Лас-Пальмас"],
-
-    # ИТАЛИЯ
     "Серия Б": ["Сампдория", "Парма", "Палермо", "Венеция", "Бари", "Кремонезе", "Комо", "Пиза", "Брешия", "Катандзаро", "Специя", "Тернана"],
     "Серия А": ["Интер", "Милан", "Ювентус", "Аталанта", "Болонья", "Рома", "Лацио", "Фиорентина", "Торино", "Наполи", "Дженоа", "Монца", "Лечче", "Удинезе", "Кальяри", "Эмполи"],
-
-    # ГЕРМАНИЯ
     "Вторая Бундеслига": ["Кёльн", "Дармштадт", "Гамбург", "Фортуна Д", "Ганновер", "Падерборн", "Герта", "Шальке", "Эльферсберг", "Нюрнберг", "Кайзерслаутерн", "Магдебург"],
     "Бундеслига": ["Бавария", "Боруссия Д", "Байер", "РБ Лейпциг", "Штутгарт", "Айнтрахт Ф", "Хоффенхайм", "Фрайбург", "Вердер", "Аугсбург", "Вольфсбург", "Боруссия М", "Унион Берлин", "Майнц", "Хайденхайм", "Санкт-Паули"],
-
-    # ПОРТУГАЛИЯ
     "Сегунда лига": ["Тондела", "Визела", "Академика", "Лейшойнш", "Оливейренсе", "Фейренсе", "Варзин", "Ковильян", "Трофенсе", "Амадора", "Мануэл да Круш", "Насьонал"],
     "Примейра": ["Порту", "Бенфика", "Спортинг", "Брага", "Витория", "Фамаликан", "Риу Аве", "Арока", "Жил Висенте", "Эшторил", "Боавишта", "Пасуш де Феррейра", "Санта-Клара", "Портимоненсе", "Морейренсе", "Насьонал"],
-
-    # БРАЗИЛИЯ
-    "Бразильская Серия А": [
-        "Фламенго", "Палмейрас", "Сантос", "Коринтианс", "Сан-Паулу",
-        "Интернасьонал", "Гремио", "Атлетико Минейро", "Крузейро", "Ботафого",
-        "Васко да Гама", "Флуминенсе", "Баия", "Форталеза", "Куяба",
-        "Атлетико Паранаэнсе", "Гояс", "Спорт Ресифи", "Сеара", "Америка Минейро"
-    ],
-
-    # НИДЕРЛАНДЫ
-    "Эрстедивизи": [
-        "Йонг Аякс", "Йонг ПСВ", "Йонг Утрехт", "Ден Босх", "Камбюр", "Де Графсхап",
-        "Дордрехт", "Эйндховен", "Эммен", "Гронинген", "Хелмонд Спорт", "Хераклес",
-        "Маастрихт", "Осс", "Рода", "Телстар", "Венло", "Виллем II", "Зволле", "Алмере Сити"
-    ],
-    "Эредивизи": [
-        "Аякс", "ПСВ", "Фейеноорд", "АЗ Алкмаар", "Твенте", "Утрехт", "Витесс",
-        "Спарта Роттердам", "Херенвен", "Фортуна Ситтард", "НЕК", "Гоу Эхед Иглз",
-        "Валвейк", "Эксельсиор", "Волендам", "Эммен", "Камбюр", "Гронинген"
-    ],
-
-    # БЕЛЬГИЯ
-    "Jupiler Pro League": [
-        "Андерлехт", "Брюгге", "Генк", "Гент", "Стандард Льеж", "Шарлеруа",
-        "Мехелен", "Антверпен", "Серкль Брюгге", "Зюлте-Варегем", "Остенде",
-        "Кортрейк", "Эйпен", "Лёвен", "Вестерло", "Беерсхот"
-    ],
-
-    # БЕЛАРУСЬ (2 ДИВИЗИОНА)
-    "Беларусь Первая лига": [
-        "Локомотив Гомель", "Барановичи", "Лида", "Молодечно",
-        "Орша", "Осиповичи", "Волна Пинск", "Жодино-Южное",
-        "Слоним-2017", "Гомель-2", "Минск-2", "Динамо-Минск-2"
-    ],
-    "Беларусь Высшая лига": [
-        "Динамо Минск", "БАТЭ", "Шахтер Солигорск", "Торпедо-БелАЗ",
-        "Неман Гродно", "Славия Мозырь", "Ислочь", "Минск",
-        "Гомель", "Сморгонь", "Нафтан Новополоцк", "Слуцк",
-        "Витебск", "Днепр-Могилев", "Арсенал Дзержинск", "Брест"
-    ],
-
-    # ТУРЦИЯ (2 ДИВИЗИОНА)
-    "Турция Первая лига": [
-        "Гёзтепе", "Алтай", "Аданаспор", "Бурсаспор",
-        "Денизлиспор", "Эскишехирспор", "Гиресунспор", "Истанбулспор",
-        "Коджаэлиспор", "Манисаспор", "Менеменспор", "Самсунспор",
-        "Тузласпор", "Умраниеспор", "Бандырмаспор", "ББ Эрзурумспор",
-        "Сакарьяспор", "Кечиоренгюджю"
-    ],
-    "Турция Суперлига": [
-        "Галатасарай", "Фенербахче", "Бешикташ", "Трабзонспор",
-        "Истанбул Башакшехир", "Адана Демирспор", "Аланьяспор",
-        "Антальяспор", "Газиантеп", "Ризеспор", "Сивасспор",
-        "Кайсериспор", "Коньяспор", "Самсунспор", "Касымпаша",
-        "Хатайспор", "Анкарагюджю", "Пендикспор", "Эюпспор",
-        "Бодрумспор"
-    ],
-
-    # КАЗАХСТАН (ТОЛЬКО 1 ДИВИЗИОН - ПРЕМЬЕР-ЛИГА)
-    "Казахстан Премьер-лига": [
-        "Актобе", "Астана", "Кайрат", "Тобол",
-        "Ордабасы", "Кызыл-Жар", "Тараз", "Шахтер-Караганда",
-        "Жетысу", "Елимай", "Кайсар", "Туран",
-        "Атырау", "Женис", "Улытау", "Каспий"
-    ]
+    "Бразильская Серия А": ["Фламенго", "Палмейрас", "Сантос", "Коринтианс", "Сан-Паулу", "Интернасьонал", "Гремио", "Атлетико Минейро", "Крузейро", "Ботафого", "Васко да Гама", "Флуминенсе", "Баия", "Форталеза", "Куяба", "Атлетико Паранаэнсе", "Гояс", "Спорт Ресифи", "Сеара", "Америка Минейро"],
+    "Эрстедивизи": ["Йонг Аякс", "Йонг ПСВ", "Йонг Утрехт", "Ден Босх", "Камбюр", "Де Графсхап", "Дордрехт", "Эйндховен", "Эммен", "Гронинген", "Хелмонд Спорт", "Хераклес", "Маастрихт", "Осс", "Рода", "Телстар", "Венло", "Виллем II", "Зволле", "Алмере Сити"],
+    "Эредивизи": ["Аякс", "ПСВ", "Фейеноорд", "АЗ Алкмаар", "Твенте", "Утрехт", "Витесс", "Спарта Роттердам", "Херенвен", "Фортуна Ситтард", "НЕК", "Гоу Эхед Иглз", "Валвейк", "Эксельсиор", "Волендам", "Эммен", "Камбюр", "Гронинген"],
+    "Jupiler Pro League": ["Андерлехт", "Брюгге", "Генк", "Гент", "Стандард Льеж", "Шарлеруа", "Мехелен", "Антверпен", "Серкль Брюгге", "Зюлте-Варегем", "Остенде", "Кортрейк", "Эйпен", "Лёвен", "Вестерло", "Беерсхот"],
+    "Беларусь Первая лига": ["Локомотив Гомель", "Барановичи", "Лида", "Молодечно", "Орша", "Осиповичи", "Волна Пинск", "Жодино-Южное", "Слоним-2017", "Гомель-2", "Минск-2", "Динамо-Минск-2"],
+    "Беларусь Высшая лига": ["Динамо Минск", "БАТЭ", "Шахтер Солигорск", "Торпедо-БелАЗ", "Неман Гродно", "Славия Мозырь", "Ислочь", "Минск", "Гомель", "Сморгонь", "Нафтан Новополоцк", "Слуцк", "Витебск", "Днепр-Могилев", "Арсенал Дзержинск", "Брест"],
+    "Турция Первая лига": ["Гёзтепе", "Алтай", "Аданаспор", "Бурсаспор", "Денизлиспор", "Эскишехирспор", "Гиресунспор", "Истанбулспор", "Коджаэлиспор", "Манисаспор", "Менеменспор", "Самсунспор", "Тузласпор", "Умраниеспор", "Бандырмаспор", "ББ Эрзурумспор", "Сакарьяспор", "Кечиоренгюджю"],
+    "Турция Суперлига": ["Галатасарай", "Фенербахче", "Бешикташ", "Трабзонспор", "Истанбул Башакшехир", "Адана Демирспор", "Аланьяспор", "Антальяспор", "Газиантеп", "Ризеспор", "Сивасспор", "Кайсериспор", "Коньяспор", "Самсунспор", "Касымпаша", "Хатайспор", "Анкарагюджю", "Пендикспор", "Эюпспор", "Бодрумспор"],
+    "Казахстан Премьер-лига": ["Актобе", "Астана", "Кайрат", "Тобол", "Ордабасы", "Кызыл-Жар", "Тараз", "Шахтер-Караганда", "Жетысу", "Елимай", "Кайсар", "Туран", "Атырау", "Женис", "Улытау", "Каспий"]
 }
 
 CLUB_RATINGS = {
-    # РОССИЯ
     "Знамя Труда": 40, "Сатурн Раменское": 45, "Коломна": 38, "Зенит-2": 52, "Спартак-2": 50, "Амкар Пермь": 48, "Динамо Киров": 42, "Рубин-2": 44, "Торпедо Владимир": 41, "Тверь": 39, "Химик Дзержинск": 43, "Иркутск": 40,
     "Черноморец": 60, "Шинник": 62, "Урал": 68, "Сочи": 69, "Балтика": 67, "Родина": 65, "Торпедо М": 66, "Арсенал Тула": 64, "КАМАЗ": 58, "Енисей": 63, "Нефтехимик": 61, "СКА-Хабаровск": 60, "Уфа": 59, "Тюмень": 57, "Ротор": 62, "Сокол": 56, "Чайка": 55, "Алания": 64,
     "Зенит": 85, "Краснодар": 83, "Динамо М": 81, "Локомотив": 80, "Спартак": 82, "ЦСКА": 81, "Ростов": 77, "Рубин": 75, "Крылья Советов": 76, "Ахмат": 74, "Факел": 72, "Оренбург": 73, "Пари НН": 71, "Химки": 70, "Акрон": 69, "Динамо Мх": 68,
-    
-    # ФРАНЦИЯ
     "Ред Стар": 45, "Ним": 44, "Дижон": 46, "Сошо": 47, "Руан": 42, "Ле Ман": 43, "Версаль": 41, "Нанси": 48, "Шатору": 40, "Кевийи": 45, "Орлеан": 42, "Булонь": 39,
     "Пари ФК": 65, "Кан": 64, "Генгам": 62, "Амьен": 61, "Бастия": 60, "Бордо": 66, "Труа": 63, "Мец": 68, "Аяччо": 59, "Лорьян": 67, "Клермон": 65, "Анси": 58, "Гренобль": 62, "Дюнкерк": 57, "По": 56, "Родез": 61, "Лаваль": 60, "Ньор": 55,
     "ПСЖ": 90, "Монако": 83, "Брест": 79, "Лилль": 82, "Ницца": 80, "Лион": 83, "Ланс": 81, "Марсель": 82, "Ренн": 80, "Реймс": 77, "Тулуза": 76, "Монпелье": 75, "Страсбур": 76, "Нант": 75, "Гавр": 73, "Осер": 72, "Анже": 71, "Сент-Этьен": 74,
-
-    # АНГЛИЯ
     "Рединг": 50, "Уиган": 52, "Болтон": 51, "Чарльтон": 49, "Барнсли": 53, "Питерборо": 50, "Блэкпул": 48, "Портсмут": 54, "Дерби Каунти": 55, "Стивенедж": 46, "Линкольн": 47, "Шрусбери": 45,
     "Лестер": 75, "Лидс": 74, "Саутгемптон": 73, "Ипсвич": 70, "Вест Бромвич": 69, "Норвич": 68, "Халл Сити": 67, "Ковентри": 68, "Престон": 66, "Мидлсбро": 69, "Кардифф": 65, "Бристоль Сити": 64, "Сандерленд": 68, "Суонси": 66, "Уотфорд": 70, "Миллуолл": 65, "КПР": 64, "Блэкберн": 66,
     "Манчестер Сити": 92, "Арсенал": 89, "Ливерпуль": 89, "Астон Вилла": 84, "Тоттенхэм": 85, "Челси": 84, "Ньюкасл": 83, "Манчестер Юнайтед": 84, "Вест Хэм": 81, "Борнмут": 78, "Кристал Пэлас": 78, "Брайтон": 80, "Фулхэм": 79, "Вулверхэмптон": 78, "Эвертон": 77, "Брентфорд": 78, "Ноттингем Форест": 76, "Шеффилд Юнайтед": 75,
-
-    # ИСПАНИЯ
     "Эспаньол": 72, "Сарагоса": 70, "Леванте": 71, "Эйбар": 71, "Спортинг Хихон": 69, "Вальядолид": 72, "Тенерифе": 68, "Овьедо": 68, "Расинг": 67, "Альбасете": 66, "Картахена": 65, "Бургос": 64,
     "Реал Мадрид": 93, "Барселона": 90, "Атлетико": 87, "Жирона": 83, "Атлетик": 82, "Реал Сосьедад": 82, "Бетис": 81, "Вильярреал": 80, "Валенсия": 79, "Алавес": 77, "Осасуна": 78, "Хетафе": 77, "Сельта": 78, "Севилья": 80, "Мальорка": 76, "Лас-Пальмас": 75,
-
-    # ИТАЛИЯ
     "Сампдория": 70, "Парма": 72, "Палермо": 71, "Венеция": 71, "Бари": 69, "Кремонезе": 72, "Комо": 70, "Пиза": 68, "Брешия": 67, "Катандзаро": 66, "Специя": 69, "Тернана": 65,
     "Интер": 90, "Милан": 86, "Ювентус": 86, "Аталанта": 84, "Болонья": 82, "Рома": 83, "Лацио": 82, "Фиорентина": 81, "Торино": 79, "Наполи": 84, "Дженоа": 77, "Монца": 76, "Лечче": 75, "Удинезе": 76, "Кальяри": 75, "Эмполи": 74,
-
-    # ГЕРМАНИЯ
     "Кёльн": 72, "Дармштадт": 69, "Гамбург": 72, "Фортуна Д": 71, "Ганновер": 70, "Падерборн": 68, "Герта": 71, "Шальке": 70, "Эльферсберг": 66, "Нюрнберг": 67, "Кайзерслаутерн": 68, "Магдебург": 66,
     "Бавария": 91, "Боруссия Д": 86, "Байер": 88, "РБ Лейпциг": 86, "Штутгарт": 82, "Айнтрахт Ф": 81, "Хоффенхайм": 78, "Фрайбург": 79, "Вердер": 77, "Аугсбург": 76, "Вольфсбург": 78, "Боруссия М": 77, "Унион Берлин": 76, "Майнц": 75, "Хайденхайм": 76, "Санкт-Паули": 74,
-
-    # ПОРТУГАЛИЯ
     "Тондела": 62, "Визела": 63, "Академика": 60, "Лейшойнш": 59, "Оливейренсе": 58, "Фейренсе": 61, "Варзин": 57, "Ковильян": 56, "Трофенсе": 55, "Амадора": 64, "Мануэл да Круш": 54, "Насьонал": 68,
     "Порту": 88, "Бенфика": 86, "Спортинг": 87, "Брага": 80, "Витория": 76, "Фамаликан": 74, "Риу Аве": 72, "Арока": 70, "Жил Висенте": 71, "Эшторил": 69, "Боавишта": 73, "Пасуш де Феррейра": 68, "Санта-Клара": 67, "Портимоненсе": 70, "Морейренсе": 72, "Насьонал": 68,
-
-    # БРАЗИЛИЯ
     "Фламенго": 85, "Палмейрас": 84, "Сантос": 80, "Коринтианс": 79, "Сан-Паулу": 78,
     "Интернасьонал": 77, "Гремио": 76, "Атлетико Минейро": 75, "Крузейро": 74, "Ботафого": 73,
     "Васко да Гама": 72, "Флуминенсе": 72, "Баия": 71, "Форталеза": 70, "Куяба": 69,
     "Атлетико Паранаэнсе": 70, "Гояс": 68, "Спорт Ресифи": 69, "Сеара": 68, "Америка Минейро": 67,
-
-    # НИДЕРЛАНДЫ
     "Йонг Аякс": 58, "Йонг ПСВ": 56, "Йонг Утрехт": 52, "Ден Босх": 55, "Камбюр": 62, "Де Графсхап": 60,
     "Дордрехт": 54, "Эйндховен": 57, "Эммен": 63, "Гронинген": 66, "Хелмонд Спорт": 53, "Хераклес": 65,
     "Маастрихт": 56, "Осс": 51, "Рода": 59, "Телстар": 52, "Венло": 58, "Виллем II": 64, "Зволле": 63, "Алмере Сити": 55,
     "Аякс": 89, "ПСВ": 88, "Фейеноорд": 86, "АЗ Алкмаар": 82, "Твенте": 79, "Утрехт": 77, "Витесс": 76,
     "Спарта Роттердам": 74, "Херенвен": 73, "Фортуна Ситтард": 72, "НЕК": 72, "Гоу Эхед Иглз": 70,
     "Валвейк": 69, "Эксельсиор": 68, "Волендам": 67, "Камбюр": 62, "Гронинген": 66,
-
-    # БЕЛЬГИЯ
     "Андерлехт": 82, "Брюгге": 84, "Генк": 80, "Гент": 78, "Стандард Льеж": 76, "Шарлеруа": 74,
     "Мехелен": 73, "Антверпен": 75, "Серкль Брюгге": 72, "Зюлте-Варегем": 70, "Остенде": 71,
     "Кортрейк": 69, "Эйпен": 68, "Лёвен": 67, "Вестерло": 69, "Беерсхот": 66,
-
-    # БЕЛАРУСЬ (2 ДИВИЗИОНА)
-    "Локомотив Гомель": 45, "Барановичи": 43, "Лида": 42,
-    "Молодечно": 41, "Орша": 40, "Осиповичи": 39,
-    "Волна Пинск": 38, "Жодино-Южное": 37, "Слоним-2017": 36,
-    "Гомель-2": 35, "Минск-2": 34, "Динамо-Минск-2": 33,
-    "Динамо Минск": 72, "БАТЭ": 70, "Шахтер Солигорск": 68,
-    "Торпедо-БелАЗ": 66, "Неман Гродно": 65, "Славия Мозырь": 63,
-    "Ислочь": 62, "Минск": 61, "Гомель": 60, "Сморгонь": 58,
-    "Нафтан Новополоцк": 57, "Слуцк": 56, "Витебск": 55,
+    "Локомотив Гомель": 45, "Барановичи": 43, "Лида": 42, "Молодечно": 41, "Орша": 40, "Осиповичи": 39,
+    "Волна Пинск": 38, "Жодино-Южное": 37, "Слоним-2017": 36, "Гомель-2": 35, "Минск-2": 34, "Динамо-Минск-2": 33,
+    "Динамо Минск": 72, "БАТЭ": 70, "Шахтер Солигорск": 68, "Торпедо-БелАЗ": 66, "Неман Гродно": 65, "Славия Мозырь": 63,
+    "Ислочь": 62, "Минск": 61, "Гомель": 60, "Сморгонь": 58, "Нафтан Новополоцк": 57, "Слуцк": 56, "Витебск": 55,
     "Днепр-Могилев": 54, "Арсенал Дзержинск": 53, "Брест": 52,
-
-    # ТУРЦИЯ (2 ДИВИЗИОНА)
-    "Гёзтепе": 52, "Алтай": 51, "Аданаспор": 50,
-    "Бурсаспор": 49, "Денизлиспор": 48, "Эскишехирспор": 47,
-    "Гиресунспор": 46, "Истанбулспор": 45, "Коджаэлиспор": 44,
-    "Манисаспор": 43, "Менеменспор": 42, "Самсунспор": 41,
-    "Тузласпор": 40, "Умраниеспор": 39, "Бандырмаспор": 38,
-    "ББ Эрзурумспор": 37, "Сакарьяспор": 36, "Кечиоренгюджю": 35,
-    "Галатасарай": 82, "Фенербахче": 81, "Бешикташ": 80,
-    "Трабзонспор": 78, "Истанбул Башакшехир": 76,
-    "Адана Демирспор": 74, "Аланьяспор": 73, "Антальяспор": 72,
-    "Газиантеп": 71, "Ризеспор": 70, "Сивасспор": 69,
-    "Кайсериспор": 68, "Коньяспор": 67, "Самсунспор": 66,
-    "Касымпаша": 65, "Хатайспор": 64, "Анкарагюджю": 63,
+    "Гёзтепе": 52, "Алтай": 51, "Аданаспор": 50, "Бурсаспор": 49, "Денизлиспор": 48, "Эскишехирспор": 47,
+    "Гиресунспор": 46, "Истанбулспор": 45, "Коджаэлиспор": 44, "Манисаспор": 43, "Менеменспор": 42, "Самсунспор": 41,
+    "Тузласпор": 40, "Умраниеспор": 39, "Бандырмаспор": 38, "ББ Эрзурумспор": 37, "Сакарьяспор": 36, "Кечиоренгюджю": 35,
+    "Галатасарай": 82, "Фенербахче": 81, "Бешикташ": 80, "Трабзонспор": 78, "Истанбул Башакшехир": 76,
+    "Адана Демирспор": 74, "Аланьяспор": 73, "Антальяспор": 72, "Газиантеп": 71, "Ризеспор": 70, "Сивасспор": 69,
+    "Кайсериспор": 68, "Коньяспор": 67, "Самсунспор": 66, "Касымпаша": 65, "Хатайспор": 64, "Анкарагюджю": 63,
     "Пендикспор": 62, "Эюпспор": 61, "Бодрумспор": 60,
-
-    # КАЗАХСТАН (1 ДИВИЗИОН - ПРЕМЬЕР-ЛИГА)
-    "Актобе": 68, "Астана": 70, "Кайрат": 69, "Тобол": 67,
-    "Ордабасы": 66, "Кызыл-Жар": 65, "Тараз": 63, "Шахтер-Караганда": 64,
-    "Жетысу": 62, "Елимай": 61, "Кайсар": 60, "Туран": 59,
-    "Атырау": 58, "Женис": 57, "Улытау": 56, "Каспий": 55
+    "Актобе": 68, "Астана": 70, "Кайрат": 69, "Тобол": 67, "Ордабасы": 66, "Кызыл-Жар": 65, "Тараз": 63, "Шахтер-Караганда": 64,
+    "Жетысу": 62, "Елимай": 61, "Кайсар": 60, "Туран": 59, "Атырау": 58, "Женис": 57, "Улытау": 56, "Каспий": 55
 }
 
 CUP_STAGES = ["1/16", "1/8", "1/4", "Полуфинал", "Финал"]
@@ -657,7 +555,6 @@ def check_train_achievements(p: dict, train_count: int, streak: int) -> tuple:
 
 # ========== ФУНКЦИЯ ЛЕЧЕНИЯ ТРАВМ ==========
 async def heal_injury_if_needed(user_id: str):
-    """Проверяет травму и лечит если пора (уменьшает на 1 каждый вызов)"""
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
     if not p:
@@ -670,6 +567,299 @@ async def heal_injury_if_needed(user_id: str):
             p["injury_tours"] = 0
         players[user_id] = p
         await save_data(PLAYERS_FILE, players)
+
+# ========== ЕВРОКУБКИ - ФУНКЦИИ ==========
+
+EURO_TOURNAMENTS = {
+    "champions_league": {
+        "name": "🏆 Лига Чемпионов",
+        "emoji": "🏆",
+        "prize_win": 150000,
+        "prize_draw": 50000,
+        "prize_top8": 500000,
+        "prize_winner": 5000000,
+        "rating_bonus_winner": 2.0
+    },
+    "europa_league": {
+        "name": "🥈 Лига Европы",
+        "emoji": "🥈",
+        "prize_win": 100000,
+        "prize_draw": 30000,
+        "prize_top8": 300000,
+        "prize_winner": 2500000,
+        "rating_bonus_winner": 1.0
+    },
+    "conference_league": {
+        "name": "🥉 Лига Конференций",
+        "emoji": "🥉",
+        "prize_win": 50000,
+        "prize_draw": 15000,
+        "prize_top8": 150000,
+        "prize_winner": 1000000,
+        "rating_bonus_winner": 0.5
+    }
+}
+
+def get_club_country(club):
+    for div, clubs in CLUBS.items():
+        if club in clubs:
+            if div in ["ФНЛ 2", "ФНЛ", "РПЛ"]:
+                return "Россия"
+            elif div in ["Насьональ", "Лига 2", "Лига 1"]:
+                return "Франция"
+            elif div in ["Первая лига Англии", "Чемпионшип", "АПЛ"]:
+                return "Англия"
+            elif div in ["Сегунда", "Ла Лига"]:
+                return "Испания"
+            elif div in ["Серия Б", "Серия А"]:
+                return "Италия"
+            elif div in ["Вторая Бундеслига", "Бундеслига"]:
+                return "Германия"
+            elif div in ["Сегунда лига", "Примейра"]:
+                return "Португалия"
+            elif div in ["Эрстедивизи", "Эредивизи"]:
+                return "Нидерланды"
+            elif div == "Jupiler Pro League":
+                return "Бельгия"
+            elif div in ["Беларусь Первая лига", "Беларусь Высшая лига"]:
+                return "Беларусь"
+            elif div in ["Турция Первая лига", "Турция Суперлига"]:
+                return "Турция"
+            elif div == "Казахстан Премьер-лига":
+                return "Казахстан"
+            elif div == "Бразильская Серия А":
+                return "Бразилия"
+    return "Неизвестно"
+
+def get_euro_tournament_by_position(division, position):
+    top_leagues = ["РПЛ", "АПЛ", "Ла Лига", "Серия А", "Бундеслига", "Лига 1", "Примейра", "Эредивизи"]
+    mid_leagues = ["ФНЛ", "Лига 2", "Чемпионшип", "Сегунда", "Серия Б", "Вторая Бундеслига", 
+                   "Сегунда лига", "Эрстедивизи", "Jupiler Pro League", "Беларусь Высшая лига", 
+                   "Турция Суперлига", "Казахстан Премьер-лига", "Бразильская Серия А"]
+    
+    if division in top_leagues:
+        if position == 1 or position <= 3:
+            return "champions_league"
+        elif position <= 5:
+            return "europa_league"
+        elif position <= 7:
+            return "conference_league"
+    elif division in mid_leagues:
+        if position == 1:
+            return "europa_league"
+        elif position <= 3:
+            return "conference_league"
+    return None
+
+async def generate_euro_data(season):
+    euro_data = {
+        "season": season,
+        "champions_league": {"clubs": [], "table": {}, "fixtures": {}, "played": 0},
+        "europa_league": {"clubs": [], "table": {}, "fixtures": {}, "played": 0},
+        "conference_league": {"clubs": [], "table": {}, "fixtures": {}, "played": 0},
+        "playoffs": {
+            "champions_league": {"round_16": [], "quarter": [], "semi": [], "final": None},
+            "europa_league": {"round_16": [], "quarter": [], "semi": [], "final": None},
+            "conference_league": {"round_16": [], "quarter": [], "semi": [], "final": None}
+        },
+        "status": "group"
+    }
+    
+    participants = await determine_euro_participants(season)
+    
+    for tournament in ["champions_league", "europa_league", "conference_league"]:
+        clubs = participants.get(tournament, [])
+        euro_data[tournament]["clubs"] = clubs
+        
+        for club in clubs:
+            euro_data[tournament]["table"][club] = {
+                "points": 0, "goals_for": 0, "goals_against": 0,
+                "played": 0, "wins": 0, "draws": 0, "losses": 0
+            }
+    
+    for tournament in ["champions_league", "europa_league", "conference_league"]:
+        clubs = euro_data[tournament]["clubs"]
+        if len(clubs) == 36:
+            fixtures = generate_swiss_fixtures(clubs)
+            euro_data[tournament]["fixtures"] = fixtures
+    
+    await save_data(EURO_FILE, euro_data)
+    return euro_data
+
+async def determine_euro_participants(season):
+    tables = await load_data(TABLES_FILE)
+    players = await load_data(PLAYERS_FILE)
+    
+    club_positions = {}
+    
+    for user_id, p in players.items():
+        if p.get("retired"):
+            continue
+        
+        club = p.get("club")
+        division = p.get("division")
+        
+        if not club or not division:
+            continue
+            
+        if user_id in tables and division in tables[user_id]:
+            table = tables[user_id][division]
+            position = next((i+1 for i, row in enumerate(table) if row["club"] == club), None)
+            if position:
+                club_positions[club] = {"division": division, "position": position}
+    
+    champions = []
+    europa = []
+    conference = []
+    
+    for club, info in club_positions.items():
+        division = info["division"]
+        position = info["position"]
+        
+        tournament = get_euro_tournament_by_position(division, position)
+        if tournament == "champions_league":
+            champions.append(club)
+        elif tournament == "europa_league":
+            europa.append(club)
+        elif tournament == "conference_league":
+            conference.append(club)
+    
+    champions = list(set(champions))
+    europa = list(set(europa))
+    conference = list(set(conference))
+    
+    all_clubs = []
+    for div, clubs in CLUBS.items():
+        all_clubs.extend(clubs)
+    all_clubs = list(set(all_clubs))
+    
+    used_clubs = set(champions + europa + conference)
+    available = [c for c in all_clubs if c not in used_clubs]
+    
+    while len(champions) < 36 and available:
+        champions.append(available.pop())
+    while len(europa) < 36 and available:
+        europa.append(available.pop())
+    while len(conference) < 36 and available:
+        conference.append(available.pop())
+    
+    return {
+        "champions_league": champions[:36],
+        "europa_league": europa[:36],
+        "conference_league": conference[:36]
+    }
+
+def generate_swiss_fixtures(clubs):
+    if len(clubs) != 36:
+        return {}
+    
+    club_ratings = {club: CLUB_RATINGS.get(club, 50) for club in clubs}
+    sorted_clubs = sorted(clubs, key=lambda x: club_ratings[x], reverse=True)
+    
+    pots = {
+        1: sorted_clubs[0:9],
+        2: sorted_clubs[9:18],
+        3: sorted_clubs[18:27],
+        4: sorted_clubs[27:36]
+    }
+    
+    fixtures = {}
+    
+    for club in clubs:
+        opponents = []
+        country = get_club_country(club)
+        
+        for pot_num in [1, 2, 3, 4]:
+            available = [c for c in pots[pot_num] 
+                        if c != club and c not in opponents and get_club_country(c) != country]
+            
+            if len(available) < 2:
+                available = [c for c in pots[pot_num] 
+                           if c != club and c not in opponents]
+            
+            random.shuffle(available)
+            opponents.extend(available[:2])
+        
+        while len(opponents) < 8:
+            for pot_num in [1, 2, 3, 4]:
+                available = [c for c in pots[pot_num] 
+                           if c != club and c not in opponents]
+                if available:
+                    opponents.append(random.choice(available))
+                    if len(opponents) >= 8:
+                        break
+        
+        opponents = opponents[:8]
+        
+        home_away = [True] * 4 + [False] * 4
+        random.shuffle(home_away)
+        
+        fixtures[club] = []
+        for i, opp in enumerate(opponents):
+            fixtures[club].append({
+                "opponent": opp,
+                "home": home_away[i],
+                "tour": i + 1,
+                "played": False,
+                "goals_for": 0,
+                "goals_against": 0,
+                "result": None
+            })
+    
+    return fixtures
+
+async def get_euro_fixture(user_id):
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if not p:
+        return None
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data or euro_data.get("status") != "group":
+        return None
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        return None
+    
+    fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
+    if not fixtures:
+        return None
+    
+    for fixture in fixtures:
+        if not fixture.get("played", False):
+            return fixture
+    
+    return None
+
+async def get_euro_position(user_id):
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if not p:
+        return None
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data:
+        return None
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        return None
+    
+    table = euro_data[tournament]["table"]
+    sorted_table = sorted(table.items(), key=lambda x: (x[1]["points"], x[1]["goals_for"] - x[1]["goals_against"]), reverse=True)
+    
+    for i, (club, data) in enumerate(sorted_table, 1):
+        if club == p["club"]:
+            return i
+    
+    return None
+
+def get_euro_name(tournament):
+    names = {
+        "champions_league": "🏆 Лига Чемпионов",
+        "europa_league": "🥈 Лига Европы",
+        "conference_league": "🥉 Лига Конференций"
+    }
+    return names.get(tournament, "❌ Нет")
 
 # ========== ГЛАВНОЕ МЕНЮ ==========
 async def main_menu_keyboard(username: str = None, user_id: str = None):
@@ -687,14 +877,544 @@ async def main_menu_keyboard(username: str = None, user_id: str = None):
         [InlineKeyboardButton(text="🟢 Онлайн / Топ", callback_data="menu_online")]
     ]
     
+    if user_id:
+        p = (await load_data(PLAYERS_FILE)).get(user_id)
+        if p and p.get("euro_tournament") and p.get("euro_tournament") != "none":
+            kb.insert(3, [InlineKeyboardButton(text="🌍 Еврокубки", callback_data="menu_euro")])
+    
     if username and username.replace("@", "") in ADMINS:
         kb.append([InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")])
         
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 # ============================================================
-# ОБРАБОТЧИКИ
+# ОБРАБОТЧИКИ ЕВРОКУБКОВ
 # ============================================================
+
+@dp.callback_query(F.data == "menu_euro")
+@with_user_lock
+async def euro_menu_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    await track_activity(user_id)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data:
+        await callback.message.edit_text(
+            "🌍 Еврокубки еще не начались.\nДождись окончания сезона!",
+            reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
+        )
+        return
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament == "none" or tournament not in euro_data:
+        await callback.message.edit_text(
+            "🌍 Твой клуб не участвует в еврокубках в этом сезоне.",
+            reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
+        )
+        return
+    
+    euro_info = EURO_TOURNAMENTS.get(tournament, {})
+    table = euro_data[tournament]["table"]
+    fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
+    
+    played = sum(1 for f in fixtures if f.get("played", False))
+    total = len(fixtures)
+    
+    position = await get_euro_position(user_id)
+    status_text = "Групповой этап" if euro_data.get("status") == "group" else "Плей-офф"
+    
+    text = f"{euro_info.get('emoji', '🌍')} **{euro_info.get('name', 'Еврокубки')}**\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"📊 Статус: {status_text}\n"
+    text += f"📈 Твое место: {position if position else '?'} из 36\n"
+    text += f"📅 Сыграно туров: {played}/{total}\n"
+    
+    if table.get(p["club"]):
+        stats = table[p["club"]]
+        text += f"📊 Очки: {stats['points']} | Голы: {stats['goals_for']}:{stats['goals_against']}\n"
+    
+    text += f"\n📋 **Календарь:**\n"
+    for i, f in enumerate(fixtures[:8], 1):
+        status = "✅" if f.get("played") else "⏳"
+        home = "🏠" if f.get("home") else "✈️"
+        result = ""
+        if f.get("played"):
+            gf = f.get("goals_for", 0)
+            ga = f.get("goals_against", 0)
+            if gf > ga:
+                result = "✅ Победа"
+            elif gf == ga:
+                result = "🤝 Ничья"
+            else:
+                result = "❌ Поражение"
+        text += f"{status} Тур {i}: {home} {f['opponent']} {result}\n"
+    
+    buttons = []
+    
+    next_match = None
+    for f in fixtures:
+        if not f.get("played", False):
+            next_match = f
+            break
+    
+    if next_match and euro_data.get("status") == "group":
+        buttons.append([InlineKeyboardButton(text="▶️ Следующий матч", callback_data="euro_play_match")])
+    
+    if euro_data.get("status") == "group" and played >= 8:
+        buttons.append([InlineKeyboardButton(text="📊 Итоги группового этапа", callback_data="euro_group_results")])
+    
+    if euro_data.get("status") == "playoff":
+        buttons.append([InlineKeyboardButton(text="🏆 Плей-офф", callback_data="euro_playoff_menu")])
+    
+    buttons.append([InlineKeyboardButton(text="📊 Таблица", callback_data="euro_table")])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+@dp.callback_query(F.data == "euro_table")
+@with_user_lock
+async def euro_table_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data:
+        await callback.answer("Еврокубки не начались")
+        return
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        await callback.answer("Ты не участвуешь в еврокубках")
+        return
+    
+    euro_info = EURO_TOURNAMENTS.get(tournament, {})
+    table = euro_data[tournament]["table"]
+    sorted_table = sorted(table.items(), key=lambda x: (x[1]["points"], x[1]["goals_for"] - x[1]["goals_against"]), reverse=True)
+    
+    text = f"📊 **ТАБЛИЦА {euro_info.get('name', '')}**\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"🏆 *Победа — 3 очка, Ничья — 1 очко*\n\n"
+    
+    for i, (club, stats) in enumerate(sorted_table[:20], 1):
+        is_p = "👉 " if club == p["club"] else "• "
+        text += f"{i}. {is_p}**{club}** — {stats['points']} очков\n"
+    
+    if len(sorted_table) > 20:
+        text += f"\n... и еще {len(sorted_table) - 20} команд"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
+    ])
+    
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+@dp.callback_query(F.data == "euro_play_match")
+@with_user_lock
+async def euro_play_match_handler(callback: CallbackQuery, state: FSMContext):
+    user_id = await get_uid(callback)
+    await track_activity(user_id)
+    
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data or euro_data.get("status") != "group":
+        await callback.answer("Групповой этап уже завершен")
+        return
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        await callback.answer("Ты не участвуешь в еврокубках")
+        return
+    
+    fixture = await get_euro_fixture(user_id)
+    if not fixture:
+        await callback.answer("Все матчи сыграны!")
+        return
+    
+    await state.update_data(euro_match={
+        "tournament": tournament,
+        "opponent": fixture["opponent"],
+        "home": fixture["home"],
+        "tour": fixture["tour"],
+        "goals": 0,
+        "assists": 0,
+        "saves": 0,
+        "tackles": 0,
+        "yellow_cards": 0,
+        "my_score": 0,
+        "opponent_score": 0,
+        "log": "",
+        "moment": 0,
+        "total_moments": random.randint(2, 4),
+        "minute": 0
+    })
+    
+    await start_euro_match(callback, state, user_id)
+
+async def start_euro_match(callback: CallbackQuery, state: FSMContext, user_id: str):
+    data = await state.get_data()
+    match = data.get("euro_match")
+    if not match:
+        return
+    
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    euro_info = EURO_TOURNAMENTS.get(match["tournament"], {})
+    
+    home_text = "🏠 Дома" if match["home"] else "✈️ В гостях"
+    
+    text = f"{euro_info.get('emoji', '🌍')} **{euro_info.get('name', 'Еврокубки')}**\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"⚔️ **{p['club']}** vs **{match['opponent']}**\n"
+    text += f"📍 {home_text}\n"
+    text += f"📅 Тур {match['tour']}/8\n\n"
+    text += f"🏟️ **Матч начался!**\n"
+    text += f"Судья дает свисток к началу игры!"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="▶️ Продолжить", callback_data="euro_match_action")]
+    ])
+    
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+@dp.callback_query(F.data == "euro_match_action")
+@with_user_lock
+async def euro_match_action_handler(callback: CallbackQuery, state: FSMContext):
+    user_id = await get_uid(callback)
+    data = await state.get_data()
+    match = data.get("euro_match")
+    if not match:
+        await callback.answer("Матч не найден")
+        return
+    
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    
+    match["moment"] += 1
+    match["minute"] = min(90, match.get("minute", 0) + random.randint(10, 25))
+    
+    if random.random() < 0.4:
+        if random.random() < 0.5:
+            if random.random() < 0.3:
+                match["my_score"] += 1
+                match["goals"] += 1
+                match["log"] += f"⚽ **{match['minute']}'** | Твоя команда забивает гол!\n"
+        else:
+            if random.random() < 0.3:
+                match["opponent_score"] += 1
+                match["log"] += f"⚡ **{match['minute']}'** | Соперник забивает гол!\n"
+    
+    if random.random() < 0.1:
+        if random.random() < 0.3:
+            match["log"] += f"🟨 **{match['minute']}'** | Желтая карточка игроку соперника.\n"
+    
+    if match["moment"] >= match["total_moments"] or match["minute"] >= 90:
+        await finish_euro_match(callback, state, user_id)
+        return
+    
+    text = f"⏱ **{match['minute']}' МИНУТА**\n"
+    text += f"⚔️ **{p['club']}** vs **{match['opponent']}**\n"
+    text += f"Счет: **{match['my_score']} : {match['opponent_score']}**\n\n"
+    text += f"📝 **События матча:**\n{match['log'] or 'Идет напряженная борьба...'}"
+    
+    match["log"] = ""
+    await state.update_data(euro_match=match)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="▶️ Продолжить", callback_data="euro_match_action")]
+    ])
+    
+    try:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+
+async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id: str):
+    data = await state.get_data()
+    match = data.get("euro_match")
+    if not match:
+        return
+    
+    players = await load_data(PLAYERS_FILE)
+    p = players.get(user_id)
+    euro_data = await load_data(EURO_FILE)
+    
+    if match["my_score"] > match["opponent_score"]:
+        result = "win"
+        points = 3
+        result_text = "🏆 **ПОБЕДА!**"
+        prize = EURO_TOURNAMENTS[match["tournament"]]["prize_win"]
+    elif match["my_score"] == match["opponent_score"]:
+        result = "draw"
+        points = 1
+        result_text = "🤝 **НИЧЬЯ**"
+        prize = EURO_TOURNAMENTS[match["tournament"]]["prize_draw"]
+    else:
+        result = "loss"
+        points = 0
+        result_text = "❌ **ПОРАЖЕНИЕ**"
+        prize = 0
+    
+    table = euro_data[match["tournament"]]["table"]
+    if p["club"] in table:
+        table[p["club"]]["points"] += points
+        table[p["club"]]["goals_for"] += match["my_score"]
+        table[p["club"]]["goals_against"] += match["opponent_score"]
+        table[p["club"]]["played"] += 1
+        if result == "win":
+            table[p["club"]]["wins"] += 1
+        elif result == "draw":
+            table[p["club"]]["draws"] += 1
+        else:
+            table[p["club"]]["losses"] += 1
+    
+    fixtures = euro_data[match["tournament"]]["fixtures"][p["club"]]
+    for f in fixtures:
+        if f["tour"] == match["tour"]:
+            f["played"] = True
+            f["goals_for"] = match["my_score"]
+            f["goals_against"] = match["opponent_score"]
+            f["result"] = result
+            break
+    
+    euro_data[match["tournament"]]["played"] += 1
+    
+    all_played = True
+    for f in fixtures:
+        if not f.get("played", False):
+            all_played = False
+            break
+    
+    if all_played:
+        euro_data["status"] = "playoff"
+        await generate_euro_playoffs(euro_data, match["tournament"])
+    
+    await save_data(EURO_FILE, euro_data)
+    
+    p["money"] = p.get("money", 0) + prize
+    p["euro_goals"] = p.get("euro_goals", 0) + match.get("goals", 0)
+    p["euro_assists"] = p.get("euro_assists", 0) + match.get("assists", 0)
+    p["euro_matches"] = p.get("euro_matches", 0) + 1
+    
+    rating_bonus = (match.get("goals", 0) * 0.1 + 
+                   match.get("assists", 0) * 0.05 +
+                   match.get("saves", 0) * 0.05 +
+                   match.get("tackles", 0) * 0.03)
+    if result == "win":
+        rating_bonus += 0.1
+    elif result == "loss":
+        rating_bonus -= 0.05
+    
+    p["rating"] = max(1.0, min(100.0, round(p["rating"] + rating_bonus, 1)))
+    
+    players[user_id] = p
+    await save_data(PLAYERS_FILE, players)
+    
+    if all_played:
+        position = await get_euro_position(user_id)
+        euro_info = EURO_TOURNAMENTS.get(match["tournament"], {})
+        
+        if position and position <= 8:
+            playoff_text = f"\n\n🎉 **Ты прошел напрямую в 1/8 финала!**"
+            p["euro_playoff_stage"] = "round_16"
+        elif position and position <= 24:
+            playoff_text = f"\n\n⚔️ **Ты попал в стыковые матчи!**"
+            p["euro_playoff_stage"] = "playoff"
+        else:
+            playoff_text = f"\n\n😔 **К сожалению, ты вылетел из еврокубков.**"
+            p["euro_tournament"] = "none"
+        
+        players[user_id] = p
+        await save_data(PLAYERS_FILE, players)
+    else:
+        playoff_text = ""
+    
+    text = (
+        f"🏁 **МАТЧ ЗАВЕРШЕН!**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚔️ **{p['club']} {match['my_score']} : {match['opponent_score']} {match['opponent']}**\n"
+        f"{result_text}\n\n"
+        f"📊 **Твоя статистика:**\n"
+        f"⚽ Голы: {match.get('goals', 0)}\n"
+        f"🅰️ Ассисты: {match.get('assists', 0)}\n"
+        f"🧤 Сейвы: {match.get('saves', 0)}\n"
+        f"🛡️ Отборы: {match.get('tackles', 0)}\n\n"
+        f"💰 Призовые: +{prize}$\n"
+        f"📈 Рейтинг: {p['rating']} ({'+' if rating_bonus >= 0 else ''}{round(rating_bonus, 1)})\n"
+        f"{playoff_text}"
+    )
+    
+    await state.clear()
+    
+    kb = await main_menu_keyboard(callback.from_user.username, user_id)
+    try:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+
+async def generate_euro_playoffs(euro_data, tournament):
+    table = euro_data[tournament]["table"]
+    sorted_table = sorted(table.items(), key=lambda x: (x[1]["points"], x[1]["goals_for"] - x[1]["goals_against"]), reverse=True)
+    
+    top8 = [club for club, _ in sorted_table[:8]]
+    playoff_teams = [club for club, _ in sorted_table[8:24]]
+    
+    random.shuffle(playoff_teams)
+    playoff_pairs = []
+    for i in range(0, len(playoff_teams), 2):
+        if i + 1 < len(playoff_teams):
+            playoff_pairs.append((playoff_teams[i], playoff_teams[i + 1]))
+    
+    round_16_teams = top8.copy()
+    for pair in playoff_pairs:
+        winner = random.choice(pair)
+        round_16_teams.append(winner)
+    
+    random.shuffle(round_16_teams)
+    round_16 = []
+    for i in range(0, len(round_16_teams), 2):
+        if i + 1 < len(round_16_teams):
+            round_16.append((round_16_teams[i], round_16_teams[i + 1]))
+    
+    euro_data["playoffs"][tournament]["round_16"] = round_16
+    
+    await save_data(EURO_FILE, euro_data)
+
+@dp.callback_query(F.data == "euro_group_results")
+@with_user_lock
+async def euro_group_results_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data:
+        await callback.answer("Еврокубки не начались")
+        return
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        await callback.answer("Ты не участвуешь в еврокубках")
+        return
+    
+    position = await get_euro_position(user_id)
+    euro_info = EURO_TOURNAMENTS.get(tournament, {})
+    
+    text = f"📊 **ИТОГИ ГРУППОВОГО ЭТАПА**\n"
+    text += f"{euro_info.get('emoji', '')} {euro_info.get('name', '')}\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"📈 Твое место: {position if position else '?'} из 36\n\n"
+    
+    if position and position <= 8:
+        text += f"🎉 **Поздравляю!**\nТы напрямую прошел в 1/8 финала!"
+    elif position and position <= 24:
+        text += f"⚔️ **Стыковые матчи!**\nТы сыграешь за выход в 1/8 финала."
+    else:
+        text += f"😔 **Вылет из еврокубков.**\nСосредоточься на следующем сезоне!"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Таблица", callback_data="euro_table")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
+    ])
+    
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+@dp.callback_query(F.data == "euro_playoff_menu")
+@with_user_lock
+async def euro_playoff_menu_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+    
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data or euro_data.get("status") != "playoff":
+        await callback.answer("Плей-офф еще не начался")
+        return
+    
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        await callback.answer("Ты не участвуешь в еврокубках")
+        return
+    
+    playoffs = euro_data["playoffs"][tournament]
+    euro_info = EURO_TOURNAMENTS.get(tournament, {})
+    
+    text = f"🏆 **ПЛЕЙ-ОФФ {euro_info.get('name', '')}**\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━\n"
+    
+    stage_names = {
+        "round_16": "1/8 финала",
+        "quarter": "1/4 финала",
+        "semi": "Полуфинал",
+        "final": "Финал"
+    }
+    
+    current_stage = p.get("euro_playoff_stage", "round_16")
+    text += f"📅 Текущая стадия: {stage_names.get(current_stage, 'Неизвестно')}\n\n"
+    
+    if current_stage == "round_16" and playoffs["round_16"]:
+        text += f"**1/8 финала:**\n"
+        for pair in playoffs["round_16"]:
+            is_my = "👉 " if p["club"] in pair else "• "
+            text += f"{is_my}{pair[0]} vs {pair[1]}\n"
+    
+    if current_stage == "round_16":
+        buttons = [[InlineKeyboardButton(text="▶️ Сыграть 1/8 финала", callback_data="euro_play_round16")]]
+    elif current_stage == "quarter":
+        buttons = [[InlineKeyboardButton(text="▶️ Сыграть 1/4 финала", callback_data="euro_play_quarter")]]
+    elif current_stage == "semi":
+        buttons = [[InlineKeyboardButton(text="▶️ Сыграть полуфинал", callback_data="euro_play_semi")]]
+    elif current_stage == "final":
+        buttons = [[InlineKeyboardButton(text="🏆 Сыграть финал!", callback_data="euro_play_final")]]
+    else:
+        buttons = []
+    
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")])
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+# ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ ==========
+async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 6):
+    sent = await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
+    await asyncio.sleep(delay)
+    try:
+        await sent.delete()
+    except Exception:
+        pass
+
+# ========== ОБРАБОТЧИКИ (ОСТАЛЬНЫЕ) ==========
 
 @dp.callback_query(F.data == "menu_online")
 async def online_handler(callback: CallbackQuery):
@@ -1413,7 +2133,12 @@ async def process_club(callback: CallbackQuery, state: FSMContext):
         "has_yoga_bonus": False,
         "last_interview_tour": 0,
         "rating_performance": 0,
-        "age_penalty_applied": False
+        "age_penalty_applied": False,
+        "euro_tournament": None,
+        "euro_goals": 0,
+        "euro_assists": 0,
+        "euro_matches": 0,
+        "euro_playoff_stage": None
     }
     
     players = await load_data(PLAYERS_FILE)
@@ -1489,7 +2214,7 @@ async def delete_career_final(callback: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
 
-# ========== ТРЕНИРОВКИ (С ПРИРОСТОМ TRUST) ==========
+# ========== ТРЕНИРОВКИ ==========
 
 @dp.callback_query(F.data == "menu_train_choice")
 @with_user_lock
@@ -1785,6 +2510,13 @@ async def profile_handler(callback: CallbackQuery):
         f"🏅 Достижений: {len(p.get('train_achievements', []))}"
     )
 
+    euro_stats = ""
+    if p.get("euro_tournament") and p.get("euro_tournament") != "none":
+        euro_stats = (
+            f"\n🌍 **Еврокубки:** {get_euro_name(p['euro_tournament'])}\n"
+            f"📈 Матчей: {p.get('euro_matches', 0)} | ⚽ Голов: {p.get('euro_goals', 0)} | 🅰️ Ассистов: {p.get('euro_assists', 0)}"
+        )
+
     text = (
         f"👑 ПРОФИЛЬ ИГРОКА\n━━━━━━━━━━━━━━━━━━━━\n"
         f"🏃‍♂️ {p['name']} | 🌍 {p.get('nation', 'Россия')} | 🎂 {p.get('age', 17)} лет\n"
@@ -1799,7 +2531,7 @@ async def profile_handler(callback: CallbackQuery):
         f"🏟️ Сезон: {season_display}/13 | Тур Лиги: {tour_display}/30\n━━━━━━━━━━━━━━━━━━━━\n"
         f"🏆 **Текущая карьера (за сезон):**\n{stats_text}\n"
         f"📈 **Общая статистика (текущий игрок):**\nВсего игр: {p.get('stats_total', {}).get('games', 0)} | Голов: {p.get('stats_total', {}).get('goals', 0)} | Ассистов: {p.get('stats_total', {}).get('assists', 0)}"
-        f"{train_stats}{history_str}"
+        f"{euro_stats}{train_stats}{history_str}"
     )
     if callback.message.photo:
         await callback.message.delete()
@@ -1822,7 +2554,6 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
     old_division = p.get("division")
     p["club"] = new_club
     p["division"] = get_division(new_club)
-    # Обнуляем доверие при переходе в новый клуб
     p["trust"] = 15
     
     base_salaries = {
@@ -1856,16 +2587,6 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
     )
 
-# ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ ==========
-async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 6):
-    """Отправляет сообщение и удаляет его через delay секунд"""
-    sent = await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
-    await asyncio.sleep(delay)
-    try:
-        await sent.delete()
-    except Exception:
-        pass
-
 # ========== ИСПРАВЛЕННЫЙ match_handler ==========
 
 @dp.callback_query(F.data == "menu_match")
@@ -1876,22 +2597,18 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
 
     user_id = await get_uid(callback)
     
-    # ========== ЛЕЧИМ ТРАВМУ ==========
     await heal_injury_if_needed(user_id)
-    # ==================================
     
     await track_activity(user_id)
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
     if await deny_if_retired_cb(callback, p): return
     
-    # ========== СБРОС СЕРИИ ==========
     if p.get("train_done", False) == False:
         if p.get("train_streak", 0) > 0:
             p["train_streak"] = 0
             players[user_id] = p
             await save_data(PLAYERS_FILE, players)
-            # Автоудаление сообщения о сбросе серии
             await send_auto_delete_message(
                 callback.message,
                 "⚠️ **СЕРИЯ ПРЕРВАНА!**\n"
@@ -1899,12 +2616,10 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 "🔥 Серия тренировок сброшена до 0!",
                 delay=6
             )
-    # ==================================
     
     trust = p.get("trust", 15)
     status = get_status_by_trust(trust)
     
-    # ========== РЕЗЕРВ (trust < 21) ==========
     if trust < 21:
         p["tour"] += 1
         p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
@@ -1930,7 +2645,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         if callback.message.photo:
             await callback.message.delete()
         
-        # Автоудаление сообщения о резерве
         await send_auto_delete_message(
             callback.message,
             f"🪑 **ТЫ В РЕЗЕРВЕ!**\n"
@@ -1941,9 +2655,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             delay=6
         )
         return
-    # ===========================================
     
-    # ========== ТРАВМА ==========
     if p.get("injury_tours", 0) > 0:
         p["tour"] += 1
         p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
@@ -1975,20 +2687,16 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         else:
             msg += "✅ **Ты полностью восстановился и готов к следующему матчу!**"
         
-        # Автоудаление сообщения о травме
         await send_auto_delete_message(callback.message, msg, delay=6)
         return
-    # ================================
     
     if p.get("fatigue", 0) >= 95:
         return await callback.answer("🚫 Ты смертельно устал! Сходи в ресторан.", show_alert=True)
     
     current_rating = p.get("rating", 40)
     
-    # ========== ЗАМЕНА (21-50) ==========
     if trust < 51:
         total_moments = random.randint(1, 2)
-        # Автоудаление сообщения о выходе на замене
         await send_auto_delete_message(
             callback.message,
             f"🔄 **ТЫ НА ЗАМЕНЕ!**\n"
@@ -1999,9 +2707,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         )
     else:
         total_moments = random.randint(2, 4)
-    # ====================================
     
-    # Предложения из Германии
     if p["division"] not in ["Бундеслига", "Вторая Бундеслига"] and random.random() < 0.15:
         if current_rating >= 74:
             ger_offers = random.sample(CLUBS["Бундеслига"], 2)
@@ -2024,7 +2730,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Португалии
     if p["division"] not in ["Примейра", "Сегунда лига"] and random.random() < 0.15:
         if current_rating >= 74:
             pt_offers = random.sample(CLUBS["Примейра"], 2)
@@ -2047,7 +2752,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Бразилии
     if p["division"] not in ["Бразильская Серия А"] and random.random() < 0.15:
         if current_rating >= 74:
             br_offers = random.sample(CLUBS["Бразильская Серия А"], 2)
@@ -2060,7 +2764,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Нидерландов
     if p["division"] not in ["Эредивизи", "Эрстедивизи"] and random.random() < 0.15:
         if current_rating >= 74:
             nl_offers = random.sample(CLUBS["Эредивизи"], 2)
@@ -2083,7 +2786,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Бельгии
     if p["division"] not in ["Jupiler Pro League"] and random.random() < 0.15:
         if current_rating >= 74:
             be_offers = random.sample(CLUBS["Jupiler Pro League"], 2)
@@ -2096,7 +2798,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Беларуси
     if p["division"] not in ["Беларусь Высшая лига"] and random.random() < 0.15:
         if current_rating >= 65:
             by_offers = random.sample(CLUBS["Беларусь Высшая лига"], 2)
@@ -2109,7 +2810,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Турции
     if p["division"] not in ["Турция Суперлига"] and random.random() < 0.15:
         if current_rating >= 68:
             tr_offers = random.sample(CLUBS["Турция Суперлига"], 2)
@@ -2122,7 +2822,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    # Предложения из Казахстана
     if p["division"] not in ["Казахстан Премьер-лига"] and random.random() < 0.15:
         if current_rating >= 55:
             kz_offers = random.sample(CLUBS["Казахстан Премьер-лига"], 2)
@@ -2940,11 +3639,30 @@ async def season_choice_handler(callback: CallbackQuery):
         p["club"]            = offer["club"]
         p["division"]        = offer["division"]
         p["contract_salary"] = offer["salary"]
-        # Обнуляем доверие при переходе в новый клуб
         p["trust"] = 15
         club_line = (f"✍️ Контракт подписан!\n"
                      f"🏟 Клуб: **{p['club']}** ({p['division']})\n"
                      f"💰 Зарплата: **{p['contract_salary']}$/матч**")
+
+    # ========== ОПРЕДЕЛЯЕМ ЕВРОКУБКИ ДЛЯ НОВОГО КЛУБА ==========
+    euro_data = await load_data(EURO_FILE)
+    if euro_data and euro_data.get("status") == "group":
+        tournament = None
+        for t in ["champions_league", "europa_league", "conference_league"]:
+            if p["club"] in euro_data[t]["clubs"]:
+                tournament = t
+                break
+        
+        if tournament:
+            p["euro_tournament"] = tournament
+            p["euro_goals"] = 0
+            p["euro_assists"] = 0
+            p["euro_matches"] = 0
+            p["euro_playoff_stage"] = None
+            club_line += f"\n\n🌍 {get_euro_name(tournament)}!"
+        else:
+            p["euro_tournament"] = "none"
+    # ===========================================================
 
     _apply_new_season_reset(p)
     players[user_id] = p
@@ -2969,17 +3687,14 @@ async def season_choice_handler(callback: CallbackQuery):
 
 async def main():
     print("🚀 Бот запущен и ожидает сообщений...")
-    print("📌 Добавлена лига Бельгии (Jupiler Pro League) - 16 клубов")
-    print("📌 Добавлена лига Беларуси (2 дивизиона) - 28 клубов")
-    print("📌 Добавлена лига Турции (2 дивизиона) - 38 клубов")
-    print("📌 Добавлена лига Казахстана (1 дивизион - Премьер-лига) - 16 клубов")
-    print("📌 Новая система тренировок: выбор направления, серии, достижения!")
-    print("📌 Исправлен статус игрока - теперь влияет на игровое время!")
-    print("📌 Исправлен баг: серия тренировок сбрасывается, если не тренироваться после матча!")
-    print("📌 ИСПРАВЛЕНО: тренировки дают +3 к доверию (trust)!")
-    print("📌 ИСПРАВЛЕНО: травмы теперь правильно проходят (уменьшаются каждый тур)!")
-    print("📌 ИСПРАВЛЕНО: доверие (trust) обнуляется до 15 при переходе в новый клуб!")
-    print("📌 ДОБАВЛЕНО: автоудаление сообщений о травме, сбросе серии и выходе на замену через 6 секунд!")
+    print("📌 ДОБАВЛЕНЫ ЕВРОКУБКИ В НОВОМ ФОРМАТЕ!")
+    print("📌 Лига Чемпионов - 36 клубов, 8 туров, швейцарская система")
+    print("📌 Лига Европы - 36 клубов, 8 туров, швейцарская система")
+    print("📌 Лига Конференций - 36 клубов, 8 туров, швейцарская система")
+    print("📌 Плей-офф: 1/8, 1/4, 1/2, Финал")
+    print("📌 Награды: деньги, рейтинг, трофеи")
+    print("📌 trust обнуляется до 15 при переходе в новый клуб")
+    print("📌 Автоудаление сообщений через 6 секунд")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
