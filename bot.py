@@ -1608,14 +1608,12 @@ async def train_execute_handler(callback: CallbackQuery):
         p["is_injured"] = True
         total_gain -= 0.5
     
-    # ========== ПРИМЕНЯЕМ ИЗМЕНЕНИЯ С ПРИРОСТОМ TRUST ==========
     p["train_done"] = True
     p["fatigue"] = min(100, p.get("fatigue", 0) + train_data["fatigue"])
     p["money"] -= cost
     p["train_streak"] = streak + 1
     p["train_count"] = p.get("train_count", 0) + 1
-    p["trust"] = min(100, p.get("trust", 15) + 3)  # <--- ПРИРОСТ TRUST
-    # ===========================================================
+    p["trust"] = min(100, p.get("trust", 15) + 3)
     
     p[f"train_{train_type}_count"] = p.get(f"train_{train_type}_count", 0) + 1
     
@@ -1824,7 +1822,8 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
     old_division = p.get("division")
     p["club"] = new_club
     p["division"] = get_division(new_club)
-    p["trust"] = 25
+    # Обнуляем доверие при переходе в новый клуб
+    p["trust"] = 15
     
     base_salaries = {
         "ФНЛ 2": 1500, "Насьональ": 1500, "Первая лига Англии": 1800,
@@ -1857,7 +1856,17 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
         parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
     )
 
-# ========== ИСПРАВЛЕННЫЙ match_handler (С ЛЕЧЕНИЕМ ТРАВМ) ==========
+# ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ ==========
+async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 6):
+    """Отправляет сообщение и удаляет его через delay секунд"""
+    sent = await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
+    await asyncio.sleep(delay)
+    try:
+        await sent.delete()
+    except Exception:
+        pass
+
+# ========== ИСПРАВЛЕННЫЙ match_handler ==========
 
 @dp.callback_query(F.data == "menu_match")
 @with_user_lock
@@ -1880,11 +1889,15 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     if p.get("train_done", False) == False:
         if p.get("train_streak", 0) > 0:
             p["train_streak"] = 0
-            await callback.message.answer(
+            players[user_id] = p
+            await save_data(PLAYERS_FILE, players)
+            # Автоудаление сообщения о сбросе серии
+            await send_auto_delete_message(
+                callback.message,
                 "⚠️ **СЕРИЯ ПРЕРВАНА!**\n"
                 "Ты сыграл матч, но не потренировался.\n"
                 "🔥 Серия тренировок сброшена до 0!",
-                parse_mode="Markdown"
+                delay=6
             )
     # ==================================
     
@@ -1917,15 +1930,17 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         if callback.message.photo:
             await callback.message.delete()
         
-        return await callback.message.answer(
+        # Автоудаление сообщения о резерве
+        await send_auto_delete_message(
+            callback.message,
             f"🪑 **ТЫ В РЕЗЕРВЕ!**\n"
             f"Ты не попал в состав на матч против **{rival}**.\n"
             f"📊 Статус: {status}\n"
             f"💡 Подними доверие (trust) до 21, чтобы играть!\n"
             f"🔹 Итог матча: **{'Победа' if outcome=='win' else 'Ничья' if outcome=='draw' else 'Поражение'}**",
-            parse_mode="Markdown",
-            reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
+            delay=6
         )
+        return
     # ===========================================
     
     # ========== ТРАВМА ==========
@@ -1960,7 +1975,9 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         else:
             msg += "✅ **Ты полностью восстановился и готов к следующему матчу!**"
         
-        return await callback.message.answer(msg, parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id))
+        # Автоудаление сообщения о травме
+        await send_auto_delete_message(callback.message, msg, delay=6)
+        return
     # ================================
     
     if p.get("fatigue", 0) >= 95:
@@ -1971,12 +1988,14 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     # ========== ЗАМЕНА (21-50) ==========
     if trust < 51:
         total_moments = random.randint(1, 2)
-        await callback.message.answer(
+        # Автоудаление сообщения о выходе на замене
+        await send_auto_delete_message(
+            callback.message,
             f"🔄 **ТЫ НА ЗАМЕНЕ!**\n"
             f"Ты выйдешь на поле во втором тайме.\n"
             f"📊 Статус: {status}\n"
             f"💡 Играй лучше, чтобы попасть в старт!",
-            parse_mode="Markdown"
+            delay=6
         )
     else:
         total_moments = random.randint(2, 4)
@@ -2921,6 +2940,8 @@ async def season_choice_handler(callback: CallbackQuery):
         p["club"]            = offer["club"]
         p["division"]        = offer["division"]
         p["contract_salary"] = offer["salary"]
+        # Обнуляем доверие при переходе в новый клуб
+        p["trust"] = 15
         club_line = (f"✍️ Контракт подписан!\n"
                      f"🏟 Клуб: **{p['club']}** ({p['division']})\n"
                      f"💰 Зарплата: **{p['contract_salary']}$/матч**")
@@ -2957,6 +2978,8 @@ async def main():
     print("📌 Исправлен баг: серия тренировок сбрасывается, если не тренироваться после матча!")
     print("📌 ИСПРАВЛЕНО: тренировки дают +3 к доверию (trust)!")
     print("📌 ИСПРАВЛЕНО: травмы теперь правильно проходят (уменьшаются каждый тур)!")
+    print("📌 ИСПРАВЛЕНО: доверие (trust) обнуляется до 15 при переходе в новый клуб!")
+    print("📌 ДОБАВЛЕНО: автоудаление сообщений о травме, сбросе серии и выходе на замену через 6 секунд!")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
