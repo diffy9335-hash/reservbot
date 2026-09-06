@@ -1405,8 +1405,9 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     else:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
-# ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ ==========
-async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 6):
+# ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ (3 СЕКУНДЫ) ==========
+async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 3):
+    """Отправляет сообщение и удаляет его через delay секунд (по умолчанию 3)"""
     sent = await message.answer(text, parse_mode=parse_mode, reply_markup=reply_markup)
     await asyncio.sleep(delay)
     try:
@@ -1414,7 +1415,9 @@ async def send_auto_delete_message(message: Message, text: str, parse_mode: str 
     except Exception:
         pass
 
-# ========== ОБРАБОТЧИКИ (ОСТАЛЬНЫЕ) ==========
+# ============================================================
+# ОБРАБОТЧИКИ (ОСТАЛЬНЫЕ)
+# ============================================================
 
 @dp.callback_query(F.data == "menu_online")
 async def online_handler(callback: CallbackQuery):
@@ -1849,34 +1852,81 @@ async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
         )
     await state.set_state(AdminPanel.waiting_for_user_id)
 
+# ========== ИСПРАВЛЕННАЯ АДМИН-ПАНЕЛЬ (ПОИСК ПО ID) ==========
 @dp.message(AdminPanel.waiting_for_user_id)
 async def admin_user_management(message: Message, state: FSMContext):
-    target_id = message.text.strip()
+    target_input = message.text.strip()
     players = await load_data(PLAYERS_FILE)
     
-    if target_id not in players or players[target_id].get("retired"):
-        return await message.answer("❌ Активный игрок с таким ID не найден.", reply_markup=await main_menu_keyboard(message.from_user.username, await get_uid(message)))
+    # Проверяем, есть ли игрок с таким ID
+    if target_input in players and not players[target_input].get("retired"):
+        target_id = target_input
+    else:
+        # Если не нашли, ищем по Telegram ID (без слота)
+        found = []
+        for uid, p in players.items():
+            if uid.startswith(target_input + "_") and not p.get("retired"):
+                found.append(uid)
+        
+        if not found:
+            return await message.answer(
+                "❌ Активный игрок с таким ID не найден.\n"
+                "Попробуй скопировать полный ID из профиля (например: 123456789_1)",
+                reply_markup=await main_menu_keyboard(message.from_user.username, await get_uid(message))
+            )
+        
+        # Если нашли несколько слотов
+        if len(found) > 1:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"Слот {uid.split('_')[1]}: {players[uid]['name']} ({players[uid].get('rating', 40)})", 
+                    callback_data=f"admin_select:{uid}"
+                )] for uid in found
+            ])
+            await message.answer("Найдено несколько профилей. Выбери нужный:", reply_markup=kb)
+            return
+        
+        target_id = found[0]
     
     await show_admin_user_profile(message, target_id)
     await state.clear()
 
+@dp.callback_query(F.data.startswith("admin_select:"))
+async def admin_select_handler(callback: CallbackQuery, state: FSMContext):
+    target_id = callback.data.split(":")[1]
+    await show_admin_user_profile(callback, target_id)
+    await state.clear()
+
+# ========== ИСПРАВЛЕННОЕ ОТОБРАЖЕНИЕ ПРОФИЛЯ В АДМИНКЕ ==========
 async def show_admin_user_profile(message_or_call, target_id):
     players = await load_data(PLAYERS_FILE)
     p = players[target_id]
     val = calculate_player_value(p["rating"], p["division"])
     
+    parts = target_id.split("_")
+    tg_id = parts[0]
+    slot = parts[1] if len(parts) > 1 else "?"
+    
     stats_text = ""
-    if p["position"] == "GK": stats_text = f"🧤 Сейвы: {p['stats_season'].get('saves', 0)}"
-    elif p["position"] == "CB": stats_text = f"🛡️ Отборы: {p['stats_season'].get('tackles', 0)} | ⚽ Голы: {p['stats_season'].get('goals', 0)}"
-    else: stats_text = f"⚽ Голы: {p['stats_season'].get('goals', 0)} | 🅰️ Ассисты: {p['stats_season'].get('assists', 0)}"
+    if p["position"] == "GK": 
+        stats_text = f"🧤 Сейвы: {p['stats_season'].get('saves', 0)}"
+    elif p["position"] == "CB": 
+        stats_text = f"🛡️ Отборы: {p['stats_season'].get('tackles', 0)} | ⚽ Голы: {p['stats_season'].get('goals', 0)}"
+    else: 
+        stats_text = f"⚽ Голы: {p['stats_season'].get('goals', 0)} | 🅰️ Ассисты: {p['stats_season'].get('assists', 0)}"
  
     text = (
-        f"👑 ПРОФИЛЬ ИГРОКА (ID: `{target_id}`)\n━━━━━━━━━━━━━━━━━━━━\n"
+        f"👑 ПРОФИЛЬ ИГРОКА\n━━━━━━━━━━━━━━━━━━━━\n"
+        f"📱 Telegram ID: `{tg_id}`\n"
+        f"💾 Полный ID: `{target_id}`\n"
+        f"📁 Слот: {slot}\n"
         f"🏃‍♂️ {p['name']} | 🌍 {p.get('nation', 'Россия')} | 🎂 {p.get('age', 17)} лет\n"
         f"⚡️ Рейтинг: {p['rating']}/100\n"
         f"🏢 Клуб: {p['club']} ({p['position']})\n"
         f"💵 Баланс: {p.get('money', 0)}$ | 🏷️ Стоимость: {val:,}$\n"
-        f"🏟️ Сезон: {p['season']} | Тур: {p['tour']}/30\n━━━━━━━━━━━━━━━━━━━━\n{stats_text}"
+        f"🏟️ Сезон: {p['season']} | Тур: {p['tour']}/30\n"
+        f"🌍 Еврокубки: {get_euro_name(p.get('euro_tournament', 'none'))}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n{stats_text}"
     )
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1888,10 +1938,11 @@ async def show_admin_user_profile(message_or_call, target_id):
     ])
     
     if isinstance(message_or_call, Message):
-        await message_or_call.answer(text, reply_markup=kb)
+        await message_or_call.answer(text, reply_markup=kb, parse_mode="Markdown")
     else:
-        await message_or_call.message.edit_text(text, reply_markup=kb)
+        await message_or_call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
+# ========== ИСПРАВЛЕННАЯ АДМИН-ПАНЕЛЬ (ТУРЫ И СЕЗОНЫ) ==========
 @dp.callback_query(F.data.startswith("adm_tour:"))
 async def adm_skip_tour(callback: CallbackQuery):
     if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
@@ -1900,8 +1951,50 @@ async def adm_skip_tour(callback: CallbackQuery):
     async with get_user_lock(target_id):
         players = await load_data(PLAYERS_FILE)
         if target_id in players:
-            players[target_id]["tour"] += 1
+            p = players[target_id]
+            p["tour"] += 1
+            p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
+            p["train_done"] = False
+            
+            # СИМУЛИРУЕМ МАТЧ ДЛЯ СТАТИСТИКИ
+            played_rivals = p.get("played_league_rivals", [])
+            rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"] and c not in played_rivals]
+            if not rival_pool:
+                rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"]]
+                p["played_league_rivals"] = []
+            
+            rival = random.choice(rival_pool)
+            p["played_league_rivals"].append(rival)
+            outcome = random.choice(["win", "draw", "loss"])
+            
+            p["stats_season"]["games"] += 1
+            p["stats_total"]["games"] = p["stats_total"].get("games", 0) + 1
+            
+            # Случайная статистика
+            if p["position"] == "ST" or p["position"] == "CM":
+                goals = random.randint(0, 2) if outcome != "loss" else 0
+                assists = random.randint(0, 1) if outcome != "loss" else 0
+                p["stats_season"]["goals"] = p["stats_season"].get("goals", 0) + goals
+                p["stats_season"]["assists"] = p["stats_season"].get("assists", 0) + assists
+                p["stats_total"]["goals"] = p["stats_total"].get("goals", 0) + goals
+                p["stats_total"]["assists"] = p["stats_total"].get("assists", 0) + assists
+            elif p["position"] == "CB":
+                tackles = random.randint(1, 5)
+                goals = random.randint(0, 1) if outcome == "win" else 0
+                p["stats_season"]["tackles"] = p["stats_season"].get("tackles", 0) + tackles
+                p["stats_season"]["goals"] = p["stats_season"].get("goals", 0) + goals
+                p["stats_total"]["tackles"] = p["stats_total"].get("tackles", 0) + tackles
+                p["stats_total"]["goals"] = p["stats_total"].get("goals", 0) + goals
+            elif p["position"] == "GK":
+                saves = random.randint(1, 7)
+                p["stats_season"]["saves"] = p["stats_season"].get("saves", 0) + saves
+                p["stats_total"]["saves"] = p["stats_total"].get("saves", 0) + saves
+            
+            # Обновляем таблицу
+            players[target_id] = p
             await save_data(PLAYERS_FILE, players)
+            await simulate_table_tour(target_id, p["division"], p["club"], rival, outcome)
+            
             await show_admin_user_profile(callback, target_id)
 
 @dp.callback_query(F.data.startswith("adm_season:"))
@@ -1912,9 +2005,21 @@ async def adm_skip_season(callback: CallbackQuery):
     async with get_user_lock(target_id):
         players = await load_data(PLAYERS_FILE)
         if target_id in players:
-            players[target_id]["season"] += 1
-            players[target_id]["tour"] = 1
+            p = players[target_id]
+            
+            # Сезон увеличивается на 1
+            p["season"] += 1
+            p["tour"] = 1
+            p["stats_season"] = {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0}
+            p["played_league_rivals"] = []
+            p["fatigue"] = max(0, p.get("fatigue", 0) - 30)
+            
+            # Пересоздаем таблицу для нового сезона
+            await init_tables_for_user(target_id, p["division"], p["club"])
+            
+            players[target_id] = p
             await save_data(PLAYERS_FILE, players)
+            
             await show_admin_user_profile(callback, target_id)
 
 @dp.callback_query(F.data.startswith("adm_money:"))
@@ -2542,6 +2647,7 @@ async def profile_handler(callback: CallbackQuery):
         except Exception:
             await callback.message.answer(text, reply_markup=kb)
 
+# ========== ИСПРАВЛЕННЫЙ ПЕРЕХОД В КЛУБ (С ГЕНЕРАЦИЕЙ ТАБЛИЦЫ) ==========
 @dp.callback_query(F.data.startswith("scandal_club:"))
 @with_user_lock
 async def scandal_club_choice_handler(callback: CallbackQuery):
@@ -2572,22 +2678,39 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
     }
     p["contract_salary"] = int(base_salaries.get(p["division"], 1500) * (p["rating"] / 45))
     
+    # Сбрасываем сыгранных соперников
+    p["played_league_rivals"] = []
+    
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
-    if old_division != p["division"]:
-        await init_tables_for_user(user_id, p["division"], p["club"])
-        p["played_league_rivals"] = []
-        players[user_id] = p
-        await save_data(PLAYERS_FILE, players)
+    # Генерируем таблицу для нового клуба с нуля
+    await init_tables_for_user(user_id, p["division"], p["club"])
+    
+    # Проверяем, участвует ли новый клуб в еврокубках
+    euro_data = await load_data(EURO_FILE)
+    if euro_data and euro_data.get("status") == "group":
+        tournament = None
+        for t in ["champions_league", "europa_league", "conference_league"]:
+            if p["club"] in euro_data[t]["clubs"]:
+                tournament = t
+                break
+        
+        if tournament:
+            p["euro_tournament"] = tournament
+        else:
+            p["euro_tournament"] = "none"
+    
+    players[user_id] = p
+    await save_data(PLAYERS_FILE, players)
     
     await callback.message.delete()
     await callback.message.answer(
-        text=f"✍️ Ты успешно перешел в **{new_club}**!\n💵 Твоя новая зарплата: **{p['contract_salary']}$/матч**.\nПора доказывать фанатам свою преданность!",
+        text=f"✍️ Ты успешно перешел в **{new_club}**!\n💵 Твоя новая зарплата: **{p['contract_salary']}$/матч**.\n📊 Таблица для новой лиги создана!\nПора доказывать фанатам свою преданность!",
         parse_mode="Markdown", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
     )
 
-# ========== ИСПРАВЛЕННЫЙ match_handler ==========
+# ========== ИСПРАВЛЕННЫЙ match_handler (БАГ С ПРЕДЛОЖЕНИЯМИ) ==========
 
 @dp.callback_query(F.data == "menu_match")
 @with_user_lock
@@ -2614,7 +2737,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 "⚠️ **СЕРИЯ ПРЕРВАНА!**\n"
                 "Ты сыграл матч, но не потренировался.\n"
                 "🔥 Серия тренировок сброшена до 0!",
-                delay=6
+                delay=3
             )
     
     trust = p.get("trust", 15)
@@ -2652,7 +2775,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             f"📊 Статус: {status}\n"
             f"💡 Подними доверие (trust) до 21, чтобы играть!\n"
             f"🔹 Итог матча: **{'Победа' if outcome=='win' else 'Ничья' if outcome=='draw' else 'Поражение'}**",
-            delay=6
+            delay=3
         )
         return
     
@@ -2687,7 +2810,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
         else:
             msg += "✅ **Ты полностью восстановился и готов к следующему матчу!**"
         
-        await send_auto_delete_message(callback.message, msg, delay=6)
+        await send_auto_delete_message(callback.message, msg, delay=3)
         return
     
     if p.get("fatigue", 0) >= 95:
@@ -2703,18 +2826,23 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             f"Ты выйдешь на поле во втором тайме.\n"
             f"📊 Статус: {status}\n"
             f"💡 Играй лучше, чтобы попасть в старт!",
-            delay=6
+            delay=3
         )
     else:
         total_moments = random.randint(2, 4)
     
-    if p["division"] not in ["Бундеслига", "Вторая Бундеслига"] and random.random() < 0.15:
+    # ========== ИСПРАВЛЕН БАГ С ПРЕДЛОЖЕНИЯМИ (ТОЛЬКО 1 РАЗ) ==========
+    offer_made = False
+    
+    # Предложения из Германии (только 1 раз)
+    if not offer_made and p["division"] not in ["Бундеслига", "Вторая Бундеслига"] and random.random() < 0.10:
         if current_rating >= 74:
             ger_offers = random.sample(CLUBS["Бундеслига"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇩🇪 {c}", callback_data=f"scandal_club:{c}")] for c in ger_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой высокий рейтинг ({current_rating}) привлек внимание клубов из Германии! Тебе предлагают контракт в **Бундеслиге**:",
                 reply_markup=kb, parse_mode="Markdown"
@@ -2725,18 +2853,21 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text=f"🇩🇪 {c}", callback_data=f"scandal_club:{c}")] for c in ger_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** На основе твоего рейтинга ({current_rating}) команды из Германии предлагают тебе контракт во **Второй Бундеслиге**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Примейра", "Сегунда лига"] and random.random() < 0.15:
+    # Предложения из Португалии (только 1 раз)
+    if not offer_made and p["division"] not in ["Примейра", "Сегунда лига"] and random.random() < 0.10:
         if current_rating >= 74:
             pt_offers = random.sample(CLUBS["Примейра"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇵🇹 {c}", callback_data=f"scandal_club:{c}")] for c in pt_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой высокий рейтинг ({current_rating}) привлек внимание клубов из Португалии! Тебе предлагают контракт в **Примейре**:",
                 reply_markup=kb, parse_mode="Markdown"
@@ -2747,30 +2878,35 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text=f"🇵🇹 {c}", callback_data=f"scandal_club:{c}")] for c in pt_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** На основе твоего рейтинга ({current_rating}) команды из Португалии предлагают тебе контракт в **Сегунда лиге**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Бразильская Серия А"] and random.random() < 0.15:
+    # Предложения из Бразилии (только 1 раз)
+    if not offer_made and p["division"] not in ["Бразильская Серия А"] and random.random() < 0.10:
         if current_rating >= 74:
             br_offers = random.sample(CLUBS["Бразильская Серия А"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇧🇷 {c}", callback_data=f"scandal_club:{c}")] for c in br_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой высокий рейтинг ({current_rating}) привлек внимание клубов из Бразилии! Тебе предлагают контракт в **Бразильской Серии А**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Эредивизи", "Эрстедивизи"] and random.random() < 0.15:
+    # Предложения из Нидерландов (только 1 раз)
+    if not offer_made and p["division"] not in ["Эредивизи", "Эрстедивизи"] and random.random() < 0.10:
         if current_rating >= 74:
             nl_offers = random.sample(CLUBS["Эредивизи"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇳🇱 {c}", callback_data=f"scandal_club:{c}")] for c in nl_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой высокий рейтинг ({current_rating}) привлек внимание клубов из Нидерландов! Тебе предлагают контракт в **Эредивизи**:",
                 reply_markup=kb, parse_mode="Markdown"
@@ -2781,54 +2917,63 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text=f"🇳🇱 {c}", callback_data=f"scandal_club:{c}")] for c in nl_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** На основе твоего рейтинга ({current_rating}) команды из Нидерландов предлагают тебе контракт в **Эрстедивизи**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Jupiler Pro League"] and random.random() < 0.15:
+    # Предложения из Бельгии (только 1 раз)
+    if not offer_made and p["division"] not in ["Jupiler Pro League"] and random.random() < 0.10:
         if current_rating >= 74:
             be_offers = random.sample(CLUBS["Jupiler Pro League"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇧🇪 {c}", callback_data=f"scandal_club:{c}")] for c in be_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой высокий рейтинг ({current_rating}) привлек внимание клубов из Бельгии! Тебе предлагают контракт в **Jupiler Pro League**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Беларусь Высшая лига"] and random.random() < 0.15:
+    # Предложения из Беларуси (только 1 раз)
+    if not offer_made and p["division"] not in ["Беларусь Высшая лига"] and random.random() < 0.10:
         if current_rating >= 65:
             by_offers = random.sample(CLUBS["Беларусь Высшая лига"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇧🇾 {c}", callback_data=f"scandal_club:{c}")] for c in by_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой рейтинг ({current_rating}) привлек внимание клубов из Беларуси! Тебе предлагают контракт в **Высшей лиге**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Турция Суперлига"] and random.random() < 0.15:
+    # Предложения из Турции (только 1 раз)
+    if not offer_made and p["division"] not in ["Турция Суперлига"] and random.random() < 0.10:
         if current_rating >= 68:
             tr_offers = random.sample(CLUBS["Турция Суперлига"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇹🇷 {c}", callback_data=f"scandal_club:{c}")] for c in tr_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой рейтинг ({current_rating}) привлек внимание клубов из Турции! Тебе предлагают контракт в **Суперлиге**:",
                 reply_markup=kb, parse_mode="Markdown"
             )
 
-    if p["division"] not in ["Казахстан Премьер-лига"] and random.random() < 0.15:
+    # Предложения из Казахстана (только 1 раз)
+    if not offer_made and p["division"] not in ["Казахстан Премьер-лига"] and random.random() < 0.10:
         if current_rating >= 55:
             kz_offers = random.sample(CLUBS["Казахстан Премьер-лига"], 2)
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"🇰🇿 {c}", callback_data=f"scandal_club:{c}")] for c in kz_offers
             ] + [[InlineKeyboardButton(text="❌ Отклонить предложение", callback_data="back_to_menu")]])
             await callback.message.delete()
+            offer_made = True
             return await callback.message.answer(
                 text=f"📈 **ТРАНСФЕРНОЕ ПРЕДЛОЖЕНИЕ!** Твой рейтинг ({current_rating}) привлек внимание клубов из Казахстана! Тебе предлагают контракт в **Премьер-лиге**:",
                 reply_markup=kb, parse_mode="Markdown"
@@ -2837,6 +2982,7 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     if p["tour"] > 30:
         return await season_results_handler(callback)
     
+    # ========== ОСТАЛЬНАЯ ЧАСТЬ МАТЧА (БЕЗ ИЗМЕНЕНИЙ) ==========
     if random.random() < 0.01:
         div_clubs = [c for c in CLUBS[p["division"]] if c != p["club"]]
         available_clubs = random.sample(div_clubs, min(len(div_clubs), 2))
@@ -2933,6 +3079,8 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     await generate_moment(callback, state, user_id)
 
 # ========== ФУНКЦИИ МАТЧА ==========
+
+# ... (все функции generate_moment, gk_act, cb_act, shoot, pass, penalty, finish_match остаются без изменений)
 
 async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
@@ -3464,6 +3612,8 @@ async def start_interview(callback: CallbackQuery, state: FSMContext, user_id: s
         parse_mode="Markdown", reply_markup=kb
     )
 
+# ========== season_results_handler И season_choice_handler (БЕЗ ИЗМЕНЕНИЙ) ==========
+
 async def season_results_handler(callback: CallbackQuery):
     user_id = await get_uid(callback)
     players = await load_data(PLAYERS_FILE)
@@ -3694,7 +3844,10 @@ async def main():
     print("📌 Плей-офф: 1/8, 1/4, 1/2, Финал")
     print("📌 Награды: деньги, рейтинг, трофеи")
     print("📌 trust обнуляется до 15 при переходе в новый клуб")
-    print("📌 Автоудаление сообщений через 6 секунд")
+    print("📌 Автоудаление сообщений через 3 секунды")
+    print("📌 ИСПРАВЛЕНО: только 1 предложение о переходе за матч")
+    print("📌 ИСПРАВЛЕНО: при переходе в клуб создается таблица с нуля")
+    print("📌 ИСПРАВЛЕНО: админ-панель считает статистику и таблицу")
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
