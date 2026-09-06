@@ -14,7 +14,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # --- НАСТРОЙКА ЛОГОВ И ТОКЕНА ---
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8979310355:AAFgfltGjZIWd41bRDJgCjMpNMEj5GfDvQY"
+BOT_TOKEN = "8979310355:AAHyL9za6zR4JrBuS_PDlhLzwuNI9nTHa08"
 
 SPONSOR_CHANNEL_ID = "@jdoauqh"
 SPONSOR_CHANNEL_URL = "https://t.me/jdoauqh"
@@ -686,6 +686,25 @@ async def generate_euro_data(season):
     await save_data(EURO_FILE, euro_data)
     return euro_data
 
+
+async def ensure_euro_initialized(user_id: str):
+    """Убедиться что еврокубки инициализированы"""
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data or "season" not in euro_data:
+        players = await load_data(PLAYERS_FILE)
+        p = players.get(user_id)
+        if p:
+            season = p.get("season", 1)
+            euro_data = await generate_euro_data(season)
+            # Назначаем турниры всем игрокам
+            for user in players.values():
+                if not user.get("retired") and "euro_tournament" not in user:
+                    division = user.get("division", "ФНЛ 2")
+                    position = user.get("position", 1)
+                    user["euro_tournament"] = get_euro_tournament_by_position(division, position)
+            await save_data(PLAYERS_FILE, players)
+    return euro_data
+
 async def determine_euro_participants(season):
     tables = await load_data(TABLES_FILE)
     players = await load_data(PLAYERS_FILE)
@@ -750,26 +769,35 @@ async def determine_euro_participants(season):
     }
 
 def generate_swiss_fixtures(clubs):
-    if len(clubs) != 36:
+    """Генерирует матчи швейцарской системы для любого количества клубов"""
+    if not clubs:
         return {}
     
     club_ratings = {club: CLUB_RATINGS.get(club, 50) for club in clubs}
     sorted_clubs = sorted(clubs, key=lambda x: club_ratings[x], reverse=True)
     
+    # Распределяем клубы по горшкам в зависимости от их количества
+    num_clubs = len(clubs)
+    pot_size = max(1, num_clubs // 4)
+    
     pots = {
-        1: sorted_clubs[0:9],
-        2: sorted_clubs[9:18],
-        3: sorted_clubs[18:27],
-        4: sorted_clubs[27:36]
+        1: sorted_clubs[0:pot_size],
+        2: sorted_clubs[pot_size:pot_size*2],
+        3: sorted_clubs[pot_size*2:pot_size*3],
+        4: sorted_clubs[pot_size*3:]
     }
     
     fixtures = {}
+    num_fixtures = min(8, num_clubs - 1)  # Каждый сыграет с минимум 8 или со всеми остальными
     
     for club in clubs:
         opponents = []
         country = get_club_country(club)
         
+        # Пробуем разнообразить оппонентов из разных горшков
         for pot_num in [1, 2, 3, 4]:
+            if len(opponents) >= num_fixtures:
+                break
             available = [c for c in pots[pot_num] 
                         if c != club and c not in opponents and get_club_country(c) != country]
             
@@ -778,20 +806,21 @@ def generate_swiss_fixtures(clubs):
                            if c != club and c not in opponents]
             
             random.shuffle(available)
-            opponents.extend(available[:2])
+            needed = min(2, num_fixtures - len(opponents))
+            opponents.extend(available[:needed])
         
-        while len(opponents) < 8:
-            for pot_num in [1, 2, 3, 4]:
-                available = [c for c in pots[pot_num] 
-                           if c != club and c not in opponents]
-                if available:
-                    opponents.append(random.choice(available))
-                    if len(opponents) >= 8:
-                        break
+        # Дополняем оппонентов если нужно
+        while len(opponents) < num_fixtures:
+            available = [c for c in clubs if c != club and c not in opponents]
+            if not available:
+                break
+            opponents.append(random.choice(available))
         
-        opponents = opponents[:8]
+        opponents = opponents[:num_fixtures]
         
-        home_away = [True] * 4 + [False] * 4
+        # Половина дома, половина в гостях
+        num_home = len(opponents) // 2
+        home_away = [True] * num_home + [False] * (len(opponents) - num_home)
         random.shuffle(home_away)
         
         fixtures[club] = []
@@ -1034,7 +1063,11 @@ async def euro_play_match_handler(callback: CallbackQuery, state: FSMContext):
         return
     
     euro_data = await load_data(EURO_FILE)
-    if not euro_data or euro_data.get("status") != "group":
+    if not euro_data:
+        await callback.answer("⚠️ Еврокубки еще не инициализированы")
+        return
+    
+    if euro_data.get("status") != "group":
         await callback.answer("Групповой этап уже завершен")
         return
     
@@ -1045,7 +1078,7 @@ async def euro_play_match_handler(callback: CallbackQuery, state: FSMContext):
     
     fixture = await get_euro_fixture(user_id)
     if not fixture:
-        await callback.answer("Все матчи сыграны!")
+        await callback.answer("✅ Все матчи групповой сыграны! Ждем результатов...", show_alert=True)
         return
     
     await state.update_data(euro_match={
