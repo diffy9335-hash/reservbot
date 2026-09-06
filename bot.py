@@ -686,25 +686,6 @@ async def generate_euro_data(season):
     await save_data(EURO_FILE, euro_data)
     return euro_data
 
-
-async def ensure_euro_initialized(user_id: str):
-    """Убедиться что еврокубки инициализированы"""
-    euro_data = await load_data(EURO_FILE)
-    if not euro_data or "season" not in euro_data:
-        players = await load_data(PLAYERS_FILE)
-        p = players.get(user_id)
-        if p:
-            season = p.get("season", 1)
-            euro_data = await generate_euro_data(season)
-            # Назначаем турниры всем игрокам
-            for user in players.values():
-                if not user.get("retired") and "euro_tournament" not in user:
-                    division = user.get("division", "ФНЛ 2")
-                    position = user.get("position", 1)
-                    user["euro_tournament"] = get_euro_tournament_by_position(division, position)
-            await save_data(PLAYERS_FILE, players)
-    return euro_data
-
 async def determine_euro_participants(season):
     tables = await load_data(TABLES_FILE)
     players = await load_data(PLAYERS_FILE)
@@ -769,35 +750,26 @@ async def determine_euro_participants(season):
     }
 
 def generate_swiss_fixtures(clubs):
-    """Генерирует матчи швейцарской системы для любого количества клубов"""
-    if not clubs:
+    if len(clubs) != 36:
         return {}
     
     club_ratings = {club: CLUB_RATINGS.get(club, 50) for club in clubs}
     sorted_clubs = sorted(clubs, key=lambda x: club_ratings[x], reverse=True)
     
-    # Распределяем клубы по горшкам в зависимости от их количества
-    num_clubs = len(clubs)
-    pot_size = max(1, num_clubs // 4)
-    
     pots = {
-        1: sorted_clubs[0:pot_size],
-        2: sorted_clubs[pot_size:pot_size*2],
-        3: sorted_clubs[pot_size*2:pot_size*3],
-        4: sorted_clubs[pot_size*3:]
+        1: sorted_clubs[0:9],
+        2: sorted_clubs[9:18],
+        3: sorted_clubs[18:27],
+        4: sorted_clubs[27:36]
     }
     
     fixtures = {}
-    num_fixtures = min(8, num_clubs - 1)  # Каждый сыграет с минимум 8 или со всеми остальными
     
     for club in clubs:
         opponents = []
         country = get_club_country(club)
         
-        # Пробуем разнообразить оппонентов из разных горшков
         for pot_num in [1, 2, 3, 4]:
-            if len(opponents) >= num_fixtures:
-                break
             available = [c for c in pots[pot_num] 
                         if c != club and c not in opponents and get_club_country(c) != country]
             
@@ -806,21 +778,20 @@ def generate_swiss_fixtures(clubs):
                            if c != club and c not in opponents]
             
             random.shuffle(available)
-            needed = min(2, num_fixtures - len(opponents))
-            opponents.extend(available[:needed])
+            opponents.extend(available[:2])
         
-        # Дополняем оппонентов если нужно
-        while len(opponents) < num_fixtures:
-            available = [c for c in clubs if c != club and c not in opponents]
-            if not available:
-                break
-            opponents.append(random.choice(available))
+        while len(opponents) < 8:
+            for pot_num in [1, 2, 3, 4]:
+                available = [c for c in pots[pot_num] 
+                           if c != club and c not in opponents]
+                if available:
+                    opponents.append(random.choice(available))
+                    if len(opponents) >= 8:
+                        break
         
-        opponents = opponents[:num_fixtures]
+        opponents = opponents[:8]
         
-        # Половина дома, половина в гостях
-        num_home = len(opponents) // 2
-        home_away = [True] * num_home + [False] * (len(opponents) - num_home)
+        home_away = [True] * 4 + [False] * 4
         random.shuffle(home_away)
         
         fixtures[club] = []
@@ -1003,12 +974,11 @@ async def euro_menu_handler(callback: CallbackQuery):
     
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_table")
 @with_user_lock
@@ -1047,12 +1017,11 @@ async def euro_table_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
     ])
     
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_play_match")
 @with_user_lock
@@ -1065,11 +1034,7 @@ async def euro_play_match_handler(callback: CallbackQuery, state: FSMContext):
         return
     
     euro_data = await load_data(EURO_FILE)
-    if not euro_data:
-        await callback.answer("⚠️ Еврокубки еще не инициализированы")
-        return
-    
-    if euro_data.get("status") != "group":
+    if not euro_data or euro_data.get("status") != "group":
         await callback.answer("Групповой этап уже завершен")
         return
     
@@ -1080,7 +1045,7 @@ async def euro_play_match_handler(callback: CallbackQuery, state: FSMContext):
     
     fixture = await get_euro_fixture(user_id)
     if not fixture:
-        await callback.answer("✅ Все матчи групповой сыграны! Ждем результатов...", show_alert=True)
+        await callback.answer("Все матчи сыграны!")
         return
     
     await state.update_data(euro_match={
@@ -1126,12 +1091,11 @@ async def start_euro_match(callback: CallbackQuery, state: FSMContext, user_id: 
         [InlineKeyboardButton(text="▶️ Продолжить", callback_data="euro_match_action")]
     ])
     
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_match_action")
 @with_user_lock
@@ -1375,12 +1339,11 @@ async def euro_group_results_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
     ])
     
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_playoff_menu")
 @with_user_lock
@@ -1436,12 +1399,11 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
 # ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ (3 СЕКУНДЫ) ==========
 async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 3):
@@ -1727,12 +1689,11 @@ async def quests_menu_handler(callback: CallbackQuery):
     
     markup = InlineKeyboardMarkup(inline_keyboard=kb)
     
-    try:
-        await callback.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        await callback.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "claim_quests")
 @with_user_lock
@@ -2109,6 +2070,13 @@ async def start_cmd(message: Message, state: FSMContext):
     
     if not await check_sub(message.from_user.id):
         return await message.answer("❗️ **Для игры необходимо подписаться на нашего спонсора!**\nСначала подпишитесь, а затем нажмите кнопку проверки.", reply_markup=sub_keyboard(), parse_mode="Markdown")
+    
+    # ИСПРАВЛЕНИЕ: Удаляем старые сообщения в чате перед новым
+    try:
+        # Пытаемся удалить предыдущие сообщения боту если они есть
+        pass
+    except:
+        pass
         
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📁 Слот 1", callback_data="select_slot:1"), InlineKeyboardButton(text="📁 Слот 2", callback_data="select_slot:2")]
@@ -2120,11 +2088,15 @@ async def check_sub_handler(callback: CallbackQuery, state: FSMContext):
     if not await check_sub(callback.from_user.id):
         return await callback.answer("❌ Вы не подписались! Подпишитесь и попробуйте снова.", show_alert=True)
     
-    await callback.message.delete()
+    # ИСПРАВЛЕНИЕ: Редактируем существующее сообщение вместо delete+answer
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📁 Слот 1", callback_data="select_slot:1"), InlineKeyboardButton(text="📁 Слот 2", callback_data="select_slot:2")]
     ])
-    await callback.message.answer("✅ Подписка подтверждена!\n\n⚽ **Добро пожаловать в симулятор футболиста!**\nВыбери слот для игры:", reply_markup=kb, parse_mode="Markdown")
+    try:
+        await callback.message.edit_text("✅ Подписка подтверждена!\n\n⚽ **Добро пожаловать в симулятор футболиста!**\nВыбери слот для игры:", reply_markup=kb, parse_mode="Markdown")
+    except:
+        await callback.message.delete()
+        await callback.message.answer("✅ Подписка подтверждена!\n\n⚽ **Добро пожаловать в симулятор футболиста!**\nВыбери слот для игры:", reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("select_slot:"))
 async def select_slot_handler(callback: CallbackQuery, state: FSMContext):
@@ -2138,14 +2110,26 @@ async def select_slot_handler(callback: CallbackQuery, state: FSMContext):
     if user_id in players and not players[user_id].get("retired", False):
         players[user_id]["username_tg"] = callback.from_user.username
         await save_data(PLAYERS_FILE, players)
-        await callback.message.edit_text(f"👋 **С возвращением, {players[user_id]['name']}!** (Слот {slot})\nТвой ID: `{user_id}`", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id), parse_mode="Markdown")
+        # ИСПРАВЛЕНИЕ: try/except для редактирования
+        try:
+            await callback.message.edit_text(f"👋 **С возвращением, {players[user_id]['name']}!** (Слот {slot})\nТвой ID: `{user_id}`", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id), parse_mode="Markdown")
+        except:
+            await callback.message.answer(f"👋 **С возвращением, {players[user_id]['name']}!** (Слот {slot})\nТвой ID: `{user_id}`", reply_markup=await main_menu_keyboard(callback.from_user.username, user_id), parse_mode="Markdown")
     else:
         if user_id in players and players[user_id].get("retired", False):
             history = players[user_id].get("career_history", [])
             await state.update_data(career_history=history)
-            await callback.message.edit_text(f"⚽ **Твоя прошлая карьера (Слот {slot}) окончена. Начнем новую!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
+            # ИСПРАВЛЕНИЕ: try/except для редактирования
+            try:
+                await callback.message.edit_text(f"⚽ **Твоя прошлая карьера (Слот {slot}) окончена. Начнем новую!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
+            except:
+                await callback.message.answer(f"⚽ **Твоя прошлая карьера (Слот {slot}) окончена. Начнем новую!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
         else:
-            await callback.message.edit_text(f"⚽ **Создаем профиль в Слоте {slot}!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
+            # ИСПРАВЛЕНИЕ: try/except для редактирования
+            try:
+                await callback.message.edit_text(f"⚽ **Создаем профиль в Слоте {slot}!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
+            except:
+                await callback.message.answer(f"⚽ **Создаем профиль в Слоте {slot}!**\nДля начала введи Имя и Фамилию:", parse_mode="Markdown")
         await state.set_state(PlayerCreation.waiting_for_name)
 
 @dp.message(PlayerCreation.waiting_for_name)
@@ -2412,12 +2396,11 @@ async def train_choice_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
     ])
     
-    try:
-        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-    except:
-        if callback.message.photo:
-            await callback.message.delete()
+    if callback.message.photo:
+        await callback.message.delete()
         await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    else:
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("train:"))
 @with_user_lock
