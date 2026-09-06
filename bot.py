@@ -1003,11 +1003,12 @@ async def euro_menu_handler(callback: CallbackQuery):
     
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    else:
+    try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_table")
 @with_user_lock
@@ -1046,11 +1047,12 @@ async def euro_table_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
     ])
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    else:
+    try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_play_match")
 @with_user_lock
@@ -1124,11 +1126,12 @@ async def start_euro_match(callback: CallbackQuery, state: FSMContext, user_id: 
         [InlineKeyboardButton(text="▶️ Продолжить", callback_data="euro_match_action")]
     ])
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    else:
+    try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_match_action")
 @with_user_lock
@@ -1372,11 +1375,12 @@ async def euro_group_results_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
     ])
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    else:
+    try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 @dp.callback_query(F.data == "euro_playoff_menu")
 @with_user_lock
@@ -1432,11 +1436,12 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    else:
+    try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 # ========== ФУНКЦИЯ ДЛЯ АВТОУДАЛЕНИЯ СООБЩЕНИЙ (3 СЕКУНДЫ) ==========
 async def send_auto_delete_message(message: Message, text: str, parse_mode: str = "Markdown", reply_markup=None, delay: int = 3):
@@ -1722,11 +1727,12 @@ async def quests_menu_handler(callback: CallbackQuery):
     
     markup = InlineKeyboardMarkup(inline_keyboard=kb)
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, reply_markup=markup, parse_mode="Markdown")
-    else:
+    try:
         await callback.message.edit_text(text, reply_markup=markup, parse_mode="Markdown")
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, reply_markup=markup, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "claim_quests")
 @with_user_lock
@@ -2406,11 +2412,12 @@ async def train_choice_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
     ])
     
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
-    else:
+    try:
         await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+    except:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 @dp.callback_query(F.data.startswith("train:"))
 @with_user_lock
