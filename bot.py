@@ -2629,7 +2629,227 @@ async def adm_process_money(message: Message, state: FSMContext):
     async with get_user_lock(target_id):
         players = await load_data(PLAYERS_FILE)
         if target_id in players:
-            players[target_id]["money"] = players[target_id].get("money", 0) + amount            await save_data(PLAYERS_FILE, players)
+# ========== АДМИН-ПАНЕЛЬ (ИСПРАВЛЕННАЯ) ==========
+
+@dp.callback_query(F.data == "admin_panel")
+async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
+    if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
+        return await callback.answer("У вас нет доступа к этой панели.", show_alert=True)
+    
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(
+            "👑 **Админ-панель**\n\nОтправьте мне **ID пользователя** (например 123456_1) для управления:", 
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_menu")]])
+        )
+    else:
+        await callback.message.edit_text(
+            "👑 **Админ-панель**\n\nОтправьте мне **ID пользователя** для управления:", 
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_menu")]])
+        )
+    await state.set_state(AdminPanel.waiting_for_user_id)
+
+@dp.message(AdminPanel.waiting_for_user_id)
+async def admin_user_management(message: Message, state: FSMContext):
+    target_input = message.text.strip()
+    players = await load_data(PLAYERS_FILE)
+    
+    if target_input in players and not players[target_input].get("retired"):
+        target_id = target_input
+    else:
+        found = []
+        for uid, p in players.items():
+            if uid.startswith(target_input + "_") and not p.get("retired"):
+                found.append(uid)
+        
+        if not found:
+            return await message.answer(
+                "❌ Активный игрок с таким ID не найден.\n"
+                "Попробуй скопировать полный ID из профиля (например: 123456789_1)",
+                reply_markup=await main_menu_keyboard(message.from_user.username, await get_uid(message))
+            )
+        
+        if len(found) > 1:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"Слот {uid.split('_')[1]}: {players[uid]['name']} ({players[uid].get('rating', 40)})", 
+                    callback_data=f"admin_select:{uid}"
+                )] for uid in found
+            ])
+            await message.answer("Найдено несколько профилей. Выбери нужный:", reply_markup=kb)
+            return
+        
+        target_id = found[0]
+    
+    await show_admin_user_profile(message, target_id)
+    await state.clear()
+
+@dp.callback_query(F.data.startswith("admin_select:"))
+async def admin_select_handler(callback: CallbackQuery, state: FSMContext):
+    target_id = callback.data.split(":")[1]
+    await show_admin_user_profile(callback, target_id)
+    await state.clear()
+
+async def show_admin_user_profile(message_or_call, target_id):
+    players = await load_data(PLAYERS_FILE)
+    p = players[target_id]
+    val = calculate_player_value(p["rating"], p["division"])
+    
+    parts = target_id.split("_")
+    tg_id = parts[0]
+    slot = parts[1] if len(parts) > 1 else "?"
+    
+    stats_text = ""
+    if p["position"] == "GK": 
+        stats_text = f"🧤 Сейвы: {p['stats_season'].get('saves', 0)}"
+    elif p["position"] == "CB": 
+        stats_text = f"🛡️ Отборы: {p['stats_season'].get('tackles', 0)} | ⚽ Голы: {p['stats_season'].get('goals', 0)}"
+    else: 
+        stats_text = f"⚽ Голы: {p['stats_season'].get('goals', 0)} | 🅰️ Ассисты: {p['stats_season'].get('assists', 0)}"
+ 
+    text = (
+        f"👑 ПРОФИЛЬ ИГРОКА\n━━━━━━━━━━━━━━━━━━━━\n"
+        f"📱 Telegram ID: `{tg_id}`\n"
+        f"💾 Полный ID: `{target_id}`\n"
+        f"📁 Слот: {slot}\n"
+        f"🏃‍♂️ {p['name']} | 🌍 {p.get('nation', 'Россия')} | 🎂 {p.get('age', 17)} лет\n"
+        f"⚡️ Рейтинг: {p['rating']}/100\n"
+        f"🏢 Клуб: {p['club']} ({p['position']})\n"
+        f"💵 Баланс: {p.get('money', 0)}$ | 🏷️ Стоимость: {val:,}$\n"
+        f"🏟️ Сезон: {p['season']} | Тур: {p['tour']}/30\n"
+        f"🌍 Еврокубки: {get_euro_name(p.get('euro_tournament', 'none'))}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n{stats_text}"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ Тур (+1)", callback_data=f"adm_tour:{target_id}"),
+         InlineKeyboardButton(text="⏭ Сезон (+1)", callback_data=f"adm_season:{target_id}")],
+        [InlineKeyboardButton(text="💰 Выдать деньги", callback_data=f"adm_money:{target_id}"),
+         InlineKeyboardButton(text="⚡️ Выдать рейтинг", callback_data=f"adm_rating:{target_id}")],
+        [InlineKeyboardButton(text="🔙 В меню", callback_data="back_to_menu")]
+    ])
+    
+    if isinstance(message_or_call, Message):
+        await message_or_call.answer(text, reply_markup=kb, parse_mode="Markdown")
+    else:
+        await message_or_call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+@dp.callback_query(F.data.startswith("adm_tour:"))
+async def adm_skip_tour(callback: CallbackQuery):
+    if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
+        return await callback.answer("Ошибка доступа.", show_alert=True)
+    target_id = callback.data.split(":")[1]
+    async with get_user_lock(target_id):
+        players = await load_data(PLAYERS_FILE)
+        if target_id in players:
+            p = players[target_id]
+            p["tour"] += 1
+            p["money"] = p.get("money", 0) + p.get("contract_salary", 1500)
+            p["train_done"] = False
+            
+            played_rivals = p.get("played_league_rivals", [])
+            rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"] and c not in played_rivals]
+            if not rival_pool:
+                rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"]]
+                p["played_league_rivals"] = []
+            
+            rival = random.choice(rival_pool)
+            p["played_league_rivals"].append(rival)
+            outcome = random.choice(["win", "draw", "loss"])
+            
+            p["stats_season"]["games"] += 1
+            p["stats_total"]["games"] = p["stats_total"].get("games", 0) + 1
+            
+            if p["position"] == "ST" or p["position"] == "CM":
+                goals = random.randint(0, 2) if outcome != "loss" else 0
+                assists = random.randint(0, 1) if outcome != "loss" else 0
+                p["stats_season"]["goals"] = p["stats_season"].get("goals", 0) + goals
+                p["stats_season"]["assists"] = p["stats_season"].get("assists", 0) + assists
+                p["stats_total"]["goals"] = p["stats_total"].get("goals", 0) + goals
+                p["stats_total"]["assists"] = p["stats_total"].get("assists", 0) + assists
+            elif p["position"] == "CB":
+                tackles = random.randint(1, 5)
+                goals = random.randint(0, 1) if outcome == "win" else 0
+                p["stats_season"]["tackles"] = p["stats_season"].get("tackles", 0) + tackles
+                p["stats_season"]["goals"] = p["stats_season"].get("goals", 0) + goals
+                p["stats_total"]["tackles"] = p["stats_total"].get("tackles", 0) + tackles
+                p["stats_total"]["goals"] = p["stats_total"].get("goals", 0) + goals
+            elif p["position"] == "GK":
+                saves = random.randint(1, 7)
+                p["stats_season"]["saves"] = p["stats_season"].get("saves", 0) + saves
+                p["stats_total"]["saves"] = p["stats_total"].get("saves", 0) + saves
+            
+            players[target_id] = p
+            await save_data(PLAYERS_FILE, players)
+            await simulate_table_tour(target_id, p["division"], p["club"], rival, outcome)
+            
+            await show_admin_user_profile(callback, target_id)
+
+@dp.callback_query(F.data.startswith("adm_season:"))
+async def adm_skip_season(callback: CallbackQuery):
+    if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
+        return await callback.answer("Ошибка доступа.", show_alert=True)
+    target_id = callback.data.split(":")[1]
+    async with get_user_lock(target_id):
+        players = await load_data(PLAYERS_FILE)
+        if target_id in players:
+            p = players[target_id]
+            
+            # Генерируем еврокубки для нового сезона
+            await generate_euro_data(p.get("season", 1) + 1)
+            
+            p["season"] += 1
+            p["tour"] = 1
+            p["stats_season"] = {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0}
+            p["played_league_rivals"] = []
+            p["fatigue"] = max(0, p.get("fatigue", 0) - 30)
+            
+            # Проверяем участие в еврокубках
+            euro_data = await load_data(EURO_FILE)
+            if euro_data and euro_data.get("status") == "group":
+                tournament = None
+                for t in ["champions_league", "europa_league", "conference_league"]:
+                    if p["club"] in euro_data[t]["clubs"]:
+                        tournament = t
+                        break
+                if tournament:
+                    p["euro_tournament"] = tournament
+                    p["euro_playoff_stage"] = None
+                    p["euro_goals"] = 0
+                    p["euro_assists"] = 0
+                    p["euro_matches"] = 0
+                else:
+                    p["euro_tournament"] = "none"
+            
+            await init_tables_for_user(target_id, p["division"], p["club"])
+            
+            players[target_id] = p
+            await save_data(PLAYERS_FILE, players)
+            
+            await show_admin_user_profile(callback, target_id)
+
+@dp.callback_query(F.data.startswith("adm_money:"))
+async def adm_money_btn(callback: CallbackQuery, state: FSMContext):
+    target_id = callback.data.split(":")[1]
+    await state.update_data(adm_target_id=target_id)
+    await callback.message.edit_text("💰 Введите сумму долларов для выдачи:", parse_mode="Markdown")
+    await state.set_state(AdminPanel.waiting_for_money)
+
+@dp.message(AdminPanel.waiting_for_money)
+async def adm_process_money(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_id = data.get("adm_target_id")
+    try: 
+        amount = int(message.text.strip())
+    except: 
+        return await message.answer("❌ Число!")
+    async with get_user_lock(target_id):
+        players = await load_data(PLAYERS_FILE)
+        if target_id in players:
+            players[target_id]["money"] = players[target_id].get("money", 0) + amount
+            await save_data(PLAYERS_FILE, players)
             await show_admin_user_profile(message, target_id)
     await state.clear()
 
@@ -2644,8 +2864,10 @@ async def adm_rating_btn(callback: CallbackQuery, state: FSMContext):
 async def adm_process_rating(message: Message, state: FSMContext):
     data = await state.get_data()
     target_id = data.get("adm_target_id")
-    try: rating = float(message.text.strip())
-    except: return await message.answer("❌ Число!")
+    try: 
+        rating = float(message.text.strip())
+    except: 
+        return await message.answer("❌ Число!")
     async with get_user_lock(target_id):
         players = await load_data(PLAYERS_FILE)
         if target_id in players:
