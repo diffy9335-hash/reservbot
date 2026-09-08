@@ -12,6 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
+# --- НАСТРОЙКА ЛОГОВ И ТОКЕНА ---
 logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = "8979310355:AAHyNdXMeqNssz741ARifPC89lVnUknN7IU"
 
@@ -246,6 +247,7 @@ CLUB_RATINGS = {
 
 CUP_STAGES = ["1/16", "1/8", "1/4", "Полуфинал", "Финал"]
 
+# --- ДАННЫЕ СПОНСОРОВ ---
 SPONSORS_DATA = {
     "Литвин":   {"emoji": "🥤", "min_rating": 40, "income_per_match": 500,   "sign_bonus": 2_000},
     "Самосвет": {"emoji": "💎", "min_rating": 50, "income_per_match": 800,   "sign_bonus": 3_000},
@@ -263,6 +265,7 @@ POSITIONS = {
     "🧤 Вратарь": "GK"
 }
 
+# --- КВЕСТЫ ---
 QUESTS_DATA = {
     "q1": {"name": "Первая кровь", "desc": "Забить 1 гол", "reward": 0.05, "type": "goals", "target": 1},
     "q2": {"name": "Бомбардир", "desc": "Забить 10 голов", "reward": 0.08, "type": "goals", "target": 10},
@@ -296,6 +299,7 @@ def get_division(club_name):
             return div
     return "ФНЛ 2"
 
+# --- ЛЕСТНИЦЫ ДИВИЗИОНОВ ---
 DIVISION_LADDERS = [
     ["ФНЛ 2", "ФНЛ", "РПЛ"],
     ["Насьональ", "Лига 2", "Лига 1"],
@@ -464,6 +468,7 @@ async def simulate_background_division(user_id, division):
         tables[user_id][division] = sorted(table, key=lambda x: x["points"], reverse=True)
         await save_data(TABLES_FILE, tables)
 
+# ========== ТРЕНИРОВКИ ==========
 TRAINING_CONFIG = {
     "ST": {
         "tech": {"name": "Дриблинг", "base_gain": 0.05, "fatigue": 15},
@@ -487,7 +492,12 @@ TRAINING_CONFIG = {
     }
 }
 
-STREAK_BONUSES = {5: 0.1, 10: 0.2, 15: 0.3, 20: 0.5}
+STREAK_BONUSES = {
+    5: 0.1,
+    10: 0.2,
+    15: 0.3,
+    20: 0.5
+}
 
 TRAIN_ACHIEVEMENTS = {
     "train_25": {"name": "🏅 Трудяга", "desc": "25 тренировок", "reward": 0.1},
@@ -539,6 +549,7 @@ def check_train_achievements(p: dict, train_count: int, streak: int) -> tuple:
     
     return unlocked, total_reward
 
+# ========== ФУНКЦИЯ ЛЕЧЕНИЯ ТРАВМ ==========
 async def heal_injury_if_needed(user_id: str):
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
@@ -552,6 +563,7 @@ async def heal_injury_if_needed(user_id: str):
             p["injury_tours"] = 0
         players[user_id] = p
         await save_data(PLAYERS_FILE, players)
+
 # ========== ЕВРОКУБКИ - ОСНОВНЫЕ ФУНКЦИИ ==========
 
 EURO_TOURNAMENTS = {
@@ -866,7 +878,6 @@ def get_euro_stage_name(stage):
         "final": "Финал"
     }
     return names.get(stage, stage)
-
 # ========== СИМУЛЯЦИЯ МАТЧЕЙ ЕВРОКУБКОВ ==========
 
 async def simulate_euro_match(club1, club2, home_advantage=True):
@@ -1088,7 +1099,46 @@ async def simulate_euro_playoff_round(euro_data, tournament, stage):
     
     euro_data["playoffs"][tournament] = playoffs
     
+    if stage == "final" and len(next_stage_teams) == 1:
+        euro_data["status"] = "finished"
+        winner_club = next_stage_teams[0]
+        euro_data["playoffs"][tournament]["winner"] = winner_club
+    
     return euro_data
+
+async def generate_euro_playoffs(euro_data, tournament):
+    table = euro_data[tournament]["table"]
+    sorted_table = sorted(table.items(), key=lambda x: (x[1]["points"], x[1]["goals_for"] - x[1]["goals_against"]), reverse=True)
+    
+    top8 = [club for club, _ in sorted_table[:8]]
+    playoff_teams = [club for club, _ in sorted_table[8:24]]
+    
+    random.shuffle(playoff_teams)
+    playoff_pairs = []
+    for i in range(0, len(playoff_teams), 2):
+        if i + 1 < len(playoff_teams):
+            playoff_pairs.append((playoff_teams[i], playoff_teams[i + 1]))
+    
+    round_16_teams = top8.copy()
+    for pair in playoff_pairs:
+        winner = random.choice(pair)
+        round_16_teams.append(winner)
+    
+    random.shuffle(round_16_teams)
+    round_16 = []
+    for i in range(0, len(round_16_teams), 2):
+        if i + 1 < len(round_16_teams):
+            round_16.append((round_16_teams[i], round_16_teams[i + 1]))
+    
+    euro_data["playoffs"][tournament]["round_16"] = round_16
+    euro_data["playoffs"][tournament]["current_stage"] = "round_16"
+    
+    euro_data["playoffs"][tournament]["quarter"] = []
+    euro_data["playoffs"][tournament]["semi"] = []
+    euro_data["playoffs"][tournament]["final"] = None
+    
+    await save_data(EURO_FILE, euro_data)
+
 # ========== ГЛАВНОЕ МЕНЮ ==========
 async def main_menu_keyboard(username: str = None, user_id: str = None):
     match_btn_text = "🎮 Матч"
@@ -1123,7 +1173,6 @@ async def send_auto_delete_message(message: Message, text: str, parse_mode: str 
         await sent.delete()
     except Exception:
         pass
-
 # ============================================================
 # ЕВРОКУБКИ - ОБРАБОТЧИКИ (ИСПРАВЛЕННЫЕ)
 # ============================================================
@@ -1768,35 +1817,6 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
             await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
-async def generate_euro_playoffs(euro_data, tournament):
-    table = euro_data[tournament]["table"]
-    sorted_table = sorted(table.items(), key=lambda x: (x[1]["points"], x[1]["goals_for"] - x[1]["goals_against"]), reverse=True)
-    
-    top8 = [club for club, _ in sorted_table[:8]]
-    playoff_teams = [club for club, _ in sorted_table[8:24]]
-    
-    random.shuffle(playoff_teams)
-    playoff_pairs = []
-    for i in range(0, len(playoff_teams), 2):
-        if i + 1 < len(playoff_teams):
-            playoff_pairs.append((playoff_teams[i], playoff_teams[i + 1]))
-    
-    round_16_teams = top8.copy()
-    for pair in playoff_pairs:
-        winner = random.choice(pair)
-        round_16_teams.append(winner)
-    
-    random.shuffle(round_16_teams)
-    round_16 = []
-    for i in range(0, len(round_16_teams), 2):
-        if i + 1 < len(round_16_teams):
-            round_16.append((round_16_teams[i], round_16_teams[i + 1]))
-    
-    euro_data["playoffs"][tournament]["round_16"] = round_16
-    euro_data["playoffs"][tournament]["current_stage"] = "round_16"
-    
-    await save_data(EURO_FILE, euro_data)
-
 # ========== ИСПРАВЛЕННЫЙ ОБРАБОТЧИК ИНТЕРВЬЮ ==========
 
 @dp.callback_query(F.data.startswith("interview:"))
@@ -1832,9 +1852,6 @@ async def interview_handler(callback: CallbackQuery, state: FSMContext):
         elif choice == "b":
             trust_gain += q.get("trust_b", 0)
             rep_gain += q.get("rep_b", 0)
-        else:
-            trust_gain += q.get("trust_c", 0)
-            rep_gain += q.get("rep_c", 0)
 
     user_id = await get_uid(callback)
     next_idx = q_idx + 1
@@ -1852,8 +1869,7 @@ async def interview_handler(callback: CallbackQuery, state: FSMContext):
         nq = questions[next_idx]
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"A) {nq['a']}", callback_data=f"interview:{next_idx}:a")],
-            [InlineKeyboardButton(text=f"B) {nq['b']}", callback_data=f"interview:{next_idx}:b")],
-            [InlineKeyboardButton(text=f"C) {nq['c']}", callback_data=f"interview:{next_idx}:c")]
+            [InlineKeyboardButton(text=f"B) {nq['b']}", callback_data=f"interview:{next_idx}:b")]
         ])
         
         try:
@@ -3239,7 +3255,6 @@ async def check_sub_handler(callback: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="📁 Слот 1", callback_data="select_slot:1"), InlineKeyboardButton(text="📁 Слот 2", callback_data="select_slot:2")]
     ])
     await callback.message.answer("✅ Подписка подтверждена!\n\n⚽ **Добро пожаловать в симулятор футболиста!**\nВыбери слот для игры:", reply_markup=kb, parse_mode="Markdown")
-
 @dp.callback_query(F.data.startswith("select_slot:"))
 async def select_slot_handler(callback: CallbackQuery, state: FSMContext):
     slot = callback.data.split(":")[1]
@@ -3471,6 +3486,7 @@ async def delete_career_final(callback: CallbackQuery, state: FSMContext):
         reply_markup=kb,
         parse_mode="Markdown"
     )
+
 # ========== ТРЕНИРОВКИ ==========
 
 @dp.callback_query(F.data == "menu_train_choice")
@@ -4787,8 +4803,8 @@ async def season_choice_handler(callback: CallbackQuery):
         if idx < 0 or idx >= len(offers):
             return await callback.answer("❌ Предложение недоступно.", show_alert=True)
         offer = offers[idx]
-        p["club"]            = offer["club"]
-        p["division"]        = offer["division"]
+        p["club"] = offer["club"]
+        p["division"] = offer["division"]
         p["contract_salary"] = offer["salary"]
         p["trust"] = 15
         club_line = (f"✍️ Контракт подписан!\n"
@@ -4796,11 +4812,10 @@ async def season_choice_handler(callback: CallbackQuery):
                      f"💰 Зарплата: **{p['contract_salary']}$/матч**")
 
     # ========== ГЕНЕРИРУЕМ ЕВРОКУБКИ ДЛЯ НОВОГО СЕЗОНА ==========
+    # ВСЕГДА генерируем новые еврокубки для нового сезона
+    new_season = p.get("season", 1) + 1
+    await generate_euro_data(new_season)
     euro_data = await load_data(EURO_FILE)
-    
-    if not euro_data or euro_data.get("status") == "playoff" or euro_data.get("status") == "finished":
-        await generate_euro_data(p.get("season", 1) + 1)
-        euro_data = await load_data(EURO_FILE)
     
     # ПРОВЕРЯЕМ УЧАСТИЕ КЛУБА В ЕВРОКУБКАХ
     if euro_data and euro_data.get("status") == "group":
