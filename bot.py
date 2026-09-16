@@ -13,7 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8979310355:AAHyNdXMeqNssz741ARifPC89lVnUknN7IU"
+BOT_TOKEN = "8979310355:AAHyNdXMeqNssz741ARifPC89lVnUknN7IUY"
 
 SPONSOR_CHANNEL_ID = "@jdoauqh"
 SPONSOR_CHANNEL_URL = "https://t.me/jdoauqh"
@@ -2894,7 +2894,10 @@ async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
     if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
         return await callback.answer("У вас нет доступа к этой панели.", show_alert=True)
 
-    text = "👑 **Админ-панель**\n\nОтправьте мне **ID пользователя** (например 123456_1) для управления:"
+    text = (
+        "👑 **Админ-панель**\n\n"
+        "Отправьте мне **ID пользователя** (например `123456_1`) для управления:"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_menu")]
     ])
@@ -2902,9 +2905,12 @@ async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     else:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        try:
+            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except TelegramBadRequest:
+            # На случай, если сообщение уже идентично или разметка сломалась
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     await state.set_state(AdminPanel.waiting_for_user_id)
-
 
 @dp.message(AdminPanel.waiting_for_user_id)
 async def admin_user_management(message: Message, state: FSMContext):
