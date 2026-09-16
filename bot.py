@@ -11,6 +11,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.exceptions import TelegramBadRequest
 
 logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = "8979310355:AAEJ5gMJUZgyJjy98oRdiO1DZU1xtpiH9Bk"
@@ -183,7 +184,6 @@ class InterviewState(StatesGroup):
     waiting_for_answer = State()
 
 
-# --- ДАННЫЕ И СПРАВОЧНИКИ ---
 EURO_NATIONS = [
     "Россия", "Франция", "Италия", "Испания", "Германия", "Англия",
     "Португалия", "Нидерланды", "Бельгия", "Украина", "Хорватия",
@@ -772,26 +772,31 @@ async def determine_euro_participants(season):
 
 
 def generate_swiss_fixtures(clubs):
+    """
+    Симметричное расписание: каждая пара играет ровно один матч,
+    у каждого клуба ровно EURO_TOTAL_TOURS матчей (по 1 в каждом туре).
+    """
     if len(clubs) < 8:
         return {}
+
+    fixtures = {club: [] for club in clubs}
 
     club_ratings = {club: CLUB_RATINGS.get(club, 50) for club in clubs}
     sorted_clubs = sorted(clubs, key=lambda x: club_ratings[x], reverse=True)
 
     num_pots = 4
-    pot_size = max(1, len(clubs) // num_pots)
+    pot_size = max(1, len(sorted_clubs) // num_pots)
     pots = {}
     for i in range(num_pots):
         start = i * pot_size
         end = min((i + 1) * pot_size, len(sorted_clubs))
         pots[i + 1] = sorted_clubs[start:end]
 
-    fixtures = {}
-
+    # Собираем для каждого клуба список из 8 соперников
+    club_opponents = {}
     for club in clubs:
         opponents = []
         country = get_club_country(club)
-
         for pot_num in [1, 2, 3, 4]:
             available = [c for c in pots.get(pot_num, [])
                          if c != club and c not in opponents and get_club_country(c) != country]
@@ -800,32 +805,70 @@ def generate_swiss_fixtures(clubs):
                              if c != club and c not in opponents]
             random.shuffle(available)
             opponents.extend(available[:2])
-
         while len(opponents) < EURO_TOTAL_TOURS:
-            for pot_num in [1, 2, 3, 4]:
-                available = [c for c in pots.get(pot_num, [])
-                             if c != club and c not in opponents]
-                if available:
-                    opponents.append(random.choice(available))
-                    if len(opponents) >= EURO_TOTAL_TOURS:
-                        break
+            pool = [c for c in clubs if c != club and c not in opponents]
+            if not pool:
+                break
+            opponents.append(random.choice(pool))
+        club_opponents[club] = opponents[:EURO_TOTAL_TOURS]
 
-        opponents = opponents[:EURO_TOTAL_TOURS]
+    # Формируем множество пар
+    pair_set = set()
+    for club in clubs:
+        for opp in club_opponents[club]:
+            pair_set.add(tuple(sorted([club, opp])))
 
-        home_away = [True] * 4 + [False] * 4
-        random.shuffle(home_away)
+    pair_home = {}
+    for a, b in pair_set:
+        pair_home[(a, b)] = random.choice([True, False])
 
-        fixtures[club] = []
-        for i, opp in enumerate(opponents):
-            fixtures[club].append({
-                "opponent": opp,
-                "home": home_away[i] if i < len(home_away) else True,
-                "tour": i + 1,
-                "played": False,
-                "goals_for": 0,
-                "goals_against": 0,
-                "result": None
-            })
+    tour_used = {club: [False] * (EURO_TOTAL_TOURS + 1) for club in clubs}
+    pair_tour = {}
+
+    pairs_list = list(pair_set)
+    random.shuffle(pairs_list)
+    # Сортируем так, чтобы сначала шли «сложные» пары — где меньше всего вариантов.
+    # Простая эвристика: сортируем по количеству уже занятых слотов у обоих клубов (по возрастанию).
+    pairs_list.sort(key=lambda pair: sum(tour_used[pair[0]][1:]) + sum(tour_used[pair[1]][1:]))
+
+    for a, b in pairs_list:
+        placed = False
+        # Пробуем туры от 1 до 8
+        candidate_tours = list(range(1, EURO_TOTAL_TOURS + 1))
+        random.shuffle(candidate_tours)
+        for t in candidate_tours:
+            if not tour_used[a][t] and not tour_used[b][t]:
+                tour_used[a][t] = True
+                tour_used[b][t] = True
+                pair_tour[(a, b)] = t
+                placed = True
+                break
+        if not placed:
+            continue
+
+    for (a, b), t in pair_tour.items():
+        a_home = pair_home[(a, b)]
+        fixtures[a].append({
+            "opponent": b,
+            "home": a_home,
+            "tour": t,
+            "played": False,
+            "goals_for": 0,
+            "goals_against": 0,
+            "result": None
+        })
+        fixtures[b].append({
+            "opponent": a,
+            "home": not a_home,
+            "tour": t,
+            "played": False,
+            "goals_for": 0,
+            "goals_against": 0,
+            "result": None
+        })
+
+    for club in fixtures:
+        fixtures[club].sort(key=lambda m: m["tour"])
 
     return fixtures
 
@@ -931,8 +974,8 @@ async def simulate_euro_match(club1, club2, home_advantage=True):
 
 async def simulate_euro_tour(euro_data, tournament, tour_number):
     """
-    Симулирует ТОЛЬКО указанный тур. Каждая пара играет 1 матч.
-    Клубы, у которых этот тур уже помечен как сыгранный, не пересимулируются.
+    Симулирует только указанный тур. Каждая пара играет 1 матч.
+    Матчи, уже помеченные played, пропускаются.
     """
     fixtures = euro_data[tournament]["fixtures"]
     table = euro_data[tournament]["table"]
@@ -1033,6 +1076,7 @@ async def simulate_euro_playoff_match(club1, club2):
 
 
 async def generate_euro_playoffs(euro_data, tournament):
+    """Строит сетку 1/8 финала из топ-8 и стыковых победителей."""
     table = euro_data[tournament]["table"]
     sorted_table = sorted(
         table.items(),
@@ -1080,6 +1124,82 @@ async def generate_euro_playoffs(euro_data, tournament):
     euro_data["playoffs"][tournament]["current_stage"] = "round_16"
 
     await save_data(EURO_FILE, euro_data)
+
+
+async def advance_playoff_round(euro_data, tournament, from_stage):
+    """
+    Продвигает сетку плей-офф: из победителей from_stage формирует следующую стадию.
+    Если пара содержит клуб игрока и он уже прошёл — оставляем его победителем.
+    """
+    stage_order = ["round_16", "quarter", "semi", "final"]
+    if from_stage not in stage_order:
+        return euro_data
+
+    idx = stage_order.index(from_stage)
+    if idx >= len(stage_order) - 1:
+        return euro_data
+
+    next_stage = stage_order[idx + 1]
+    pairs = euro_data["playoffs"][tournament].get(from_stage, [])
+    if not pairs:
+        return euro_data
+
+    players = await load_data(PLAYERS_FILE)
+    # Находим клуб игрока в этом турнире
+    player_club = None
+    for uid, pdata in players.items():
+        if pdata.get("retired"):
+            continue
+        if pdata.get("euro_tournament") == tournament:
+            player_club = pdata.get("club")
+            break
+
+    winners = []
+    for a, b in pairs:
+        # Если в паре есть клуб игрока, проверяем, прошёл ли он (по eurо_playoff_stage)
+        # Он прошёл, если его stage_played для этой стадии True и он не eliminated
+        if player_club and player_club in (a, b):
+            # Ищем профиль игрока
+            player_passed = False
+            for uid, pdata in players.items():
+                if pdata.get("retired"):
+                    continue
+                if pdata.get("club") == player_club and pdata.get("euro_tournament") == tournament:
+                    if not pdata.get(f"{from_stage}_played", False):
+                        # Матч ещё не сыгран — оставляем пару как есть
+                        player_passed = None
+                        break
+                    stage_order_local = ["round_16", "quarter", "semi", "final"]
+                    cur = pdata.get("euro_playoff_stage")
+                    if cur == "eliminated":
+                        player_passed = False
+                    elif cur in stage_order_local:
+                        # Игрок прошёл, если текущая стадия выше from_stage
+                        if stage_order_local.index(cur) > idx:
+                            player_passed = True
+                        else:
+                            player_passed = False
+                    else:
+                        player_passed = False
+                    break
+            if player_passed is None:
+                # Матч игрока ещё не сыгран — сетку не двигаем
+                return euro_data
+            winners.append(player_club if player_passed else (b if a == player_club else a))
+        else:
+            _, _, w = await simulate_euro_playoff_match(a, b)
+            winners.append(w)
+
+    random.shuffle(winners)
+    next_pairs = []
+    for i in range(0, len(winners), 2):
+        if i + 1 < len(winners):
+            next_pairs.append((winners[i], winners[i + 1]))
+
+    euro_data["playoffs"][tournament][next_stage] = next_pairs
+    euro_data["playoffs"][tournament]["current_stage"] = next_stage
+    await save_data(EURO_FILE, euro_data)
+    return euro_data
 # ========== ГЛАВНОЕ МЕНЮ ==========
 
 async def main_menu_keyboard(username: str = None, user_id: str = None):
@@ -1376,7 +1496,7 @@ async def _render_euro_table(callback, user_id, p, euro_data, tournament, page):
 
 
 # ============================================================
-# ГРУППОВОЙ ЭТАП: интер  ктивный матч
+# ГРУППОВОЙ ЭТАП: интерактивный матч
 # ============================================================
 
 @dp.callback_query(F.data == "euro_play_match")
@@ -1465,7 +1585,7 @@ async def euro_moment_next_handler(callback: CallbackQuery, state: FSMContext):
 
 
 async def generate_euro_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
-    """Генерирует момент группового этапа. НЕ увеличивает match['moment']."""
+    """Генерирует момент группового этапа. НЕ увеличивает match['moment'] (он уже увеличен действием)."""
     data = await state.get_data()
     match = data.get("euro_match")
     if not match:
@@ -1512,11 +1632,12 @@ async def generate_euro_moment(callback: CallbackQuery, state: FSMContext, user_
                 match["log"] += f"🟥 **{match['minute']}'** | ВТОРАЯ ЖЕЛТАЯ — УДАЛЕНИЕ!\n"
                 match["minute"] = 90
 
+    # Если момент уже выбран (получен извне) — проверяем только завершение
     if match["moment"] >= match["total_moments"] or match["minute"] >= 90:
         await finish_euro_match(callback, state, user_id)
         return
 
-    # Момент для игрока — показываем действие
+    # Иначе увеличиваем счётчик момента и показываем действие
     match["moment"] += 1
     await state.update_data(euro_match=match)
 
@@ -1567,7 +1688,7 @@ async def generate_euro_moment(callback: CallbackQuery, state: FSMContext, user_
 
 
 # ============================================================
-# ПЛЕЙ-ОФФ: интерактивный матч
+# ПЛЕЙ-ОФФ: меню и интерактивный матч
 # ============================================================
 
 @dp.callback_query(F.data == "euro_group_results")
@@ -1657,6 +1778,16 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
             ])
         )
         return
+
+    # Если сетка текущей стадии пуста — продвигаем её из предыдущей
+    if not playoffs.get(current_stage):
+        stage_order = ["round_16", "quarter", "semi", "final"]
+        idx = stage_order.index(current_stage) if current_stage in stage_order else -1
+        if idx > 0:
+            prev_stage = stage_order[idx - 1]
+            await advance_playoff_round(euro_data, tournament, prev_stage)
+            euro_data = await load_data(EURO_FILE)
+            playoffs = euro_data["playoffs"][tournament]
 
     text = f"🏆 **ПЛЕЙ-ОФФ {euro_info.get('name', '')}**\n"
     text += "━━━━━━━━━━━━━━━━━━━━\n"
@@ -1761,8 +1892,7 @@ async def euro_simulate_playoff_match(callback: CallbackQuery, stage: str):
 
     goals1, goals2, winner = await simulate_euro_playoff_match(p["club"], opponent)
 
-    stage_played_key = f"{stage}_played"
-    p[stage_played_key] = True
+    p[f"{stage}_played"] = True
 
     if winner == p["club"]:
         result_text = "🏆 **ПОБЕДА! ТЫ ПРОШЕЛ ДАЛЬШЕ!**"
@@ -1773,6 +1903,7 @@ async def euro_simulate_playoff_match(callback: CallbackQuery, stage: str):
 
         if current_idx < len(stage_order) - 1:
             p["euro_playoff_stage"] = stage_order[current_idx + 1]
+            await advance_playoff_round(euro_data, tournament, stage)
         else:
             p["trophies"] = p.get("trophies", []) + [
                 f"🏆 {EURO_TOURNAMENTS[tournament]['name']} (Сезон {p.get('season', 1)})"
@@ -1887,8 +2018,7 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
         await callback.answer("Ты не участвуешь в этой стадии")
         return
 
-    stage_played_key = f"{stage}_played"
-    if p.get(stage_played_key, False):
+    if p.get(f"{stage}_played", False):
         await callback.answer("Ты уже сыграл этот матч!")
         return
 
@@ -1934,7 +2064,7 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
 
 
 async def euro_playoff_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
-    """Момент плей-офф. НЕ увеличивает match['moment'] здесь."""
+    """Момент плей-офф. НЕ увеличивает match['moment'] здесь — это делает действие."""
     data = await state.get_data()
     match = data.get("euro_match")
     if not match:
@@ -2281,7 +2411,7 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
             f["result"] = result
             break
 
-    # Помечаем зеркальный матч соперника + обновляем его таблицу
+    # Зеркальный матч соперника
     for m in euro_data[tournament]["fixtures"].get(opponent, []):
         if m["tour"] == my_tour and m["opponent"] == my_club:
             m["played"] = True
@@ -2312,6 +2442,18 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
     p["euro_assists"] = p.get("euro_assists", 0) + match.get("assists", 0)
     p["euro_matches"] = p.get("euro_matches", 0) + 1
 
+    # === Обновляем общую статистику и статистику сезона ===
+    p.setdefault("stats_season", {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0})
+    p.setdefault("stats_total", {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0})
+
+    for stat in ("goals", "assists", "saves", "tackles"):
+        p["stats_season"][stat] = p["stats_season"].get(stat, 0) + match.get(stat, 0)
+        p["stats_total"][stat] = p["stats_total"].get(stat, 0) + match.get(stat, 0)
+
+    p["stats_season"]["games"] = p["stats_season"].get("games", 0) + 1
+    p["stats_total"]["games"] = p["stats_total"].get("games", 0) + 1
+
+    # Рейтинг
     rating_bonus = (
         match.get("goals", 0) * 0.1 +
         match.get("assists", 0) * 0.05 +
@@ -2374,7 +2516,7 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
 
 
 # ============================================================
-# ФИНАЛИЗАЦИЯ МАТЧА ПЛЕЙ-ОФФ (с доп. временем и пенальти)
+# ФИНАЛИЗАЦИЯ МАТЧА ПЛЕЙ-ОФФ
 # ============================================================
 
 async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, user_id: str):
@@ -2389,7 +2531,9 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
 
     stage = match.get("stage")
     stage_name = match.get("stage_name", "Матч")
+    tournament = match["tournament"]
 
+    # Доп. время и пенальти
     if match["my_score"] == match["opponent_score"]:
         match["log"] += "\n⏱ **ДОПОЛНИТЕЛЬНОЕ ВРЕМЯ!**\n"
         await state.update_data(euro_match=match)
@@ -2476,20 +2620,21 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
 
     if won:
         result_text = "🏆 **ПОБЕДА! ТЫ ПРОШЕЛ ДАЛЬШЕ!**"
-        prize = EURO_TOURNAMENTS[match["tournament"]]["prize_win"] * 2
+        prize = EURO_TOURNAMENTS[tournament]["prize_win"] * 2
 
         stage_order = ["round_16", "quarter", "semi", "final"]
         current_idx = stage_order.index(stage) if stage in stage_order else -1
 
         if current_idx < len(stage_order) - 1:
             p["euro_playoff_stage"] = stage_order[current_idx + 1]
+            # Продвигаем сетку: заполняем следующую стадию
+            await advance_playoff_round(euro_data, tournament, stage)
         else:
-            # Финал выигран
             p["trophies"] = p.get("trophies", []) + [
-                f"🏆 {EURO_TOURNAMENTS[match['tournament']]['name']} (Сезон {p.get('season', 1)})"
+                f"🏆 {EURO_TOURNAMENTS[tournament]['name']} (Сезон {p.get('season', 1)})"
             ]
-            p["money"] = p.get("money", 0) + EURO_TOURNAMENTS[match["tournament"]]["prize_winner"]
-            p["rating"] = min(100.0, p["rating"] + EURO_TOURNAMENTS[match["tournament"]]["rating_bonus_winner"])
+            p["money"] = p.get("money", 0) + EURO_TOURNAMENTS[tournament]["prize_winner"]
+            p["rating"] = min(100.0, p["rating"] + EURO_TOURNAMENTS[tournament]["rating_bonus_winner"])
             p["euro_tournament"] = "none"
             p["euro_playoff_stage"] = None
     else:
@@ -2499,6 +2644,21 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
         p["euro_playoff_stage"] = "eliminated"
 
     p[f"{stage}_played"] = True
+
+    # === Обновляем общую статистику и статистику сезона ===
+    p.setdefault("stats_season", {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0})
+    p.setdefault("stats_total", {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0})
+
+    for stat in ("goals", "assists", "saves", "tackles"):
+        p["stats_season"][stat] = p["stats_season"].get(stat, 0) + match.get(stat, 0)
+        p["stats_total"][stat] = p["stats_total"].get(stat, 0) + match.get(stat, 0)
+
+    p["stats_season"]["games"] = p["stats_season"].get("games", 0) + 1
+    p["stats_total"]["games"] = p["stats_total"].get("games", 0) + 1
+
+    p["euro_matches"] = p.get("euro_matches", 0) + 1
+    p["euro_goals"] = p.get("euro_goals", 0) + match.get("goals", 0)
+    p["euro_assists"] = p.get("euro_assists", 0) + match.get("assists", 0)
 
     rating_bonus = (
         match.get("goals", 0) * 0.1 +
@@ -2513,9 +2673,6 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
 
     p["rating"] = max(1.0, min(100.0, round(p["rating"] + rating_bonus, 1)))
     p["money"] = p.get("money", 0) + prize
-    p["euro_matches"] = p.get("euro_matches", 0) + 1
-    p["euro_goals"] = p.get("euro_goals", 0) + match.get("goals", 0)
-    p["euro_assists"] = p.get("euro_assists", 0) + match.get("assists", 0)
 
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
@@ -2908,9 +3065,9 @@ async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
         try:
             await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
         except TelegramBadRequest:
-            # На случай, если сообщение уже идентично или разметка сломалась
             await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     await state.set_state(AdminPanel.waiting_for_user_id)
+
 
 @dp.message(AdminPanel.waiting_for_user_id)
 async def admin_user_management(message: Message, state: FSMContext):
@@ -2926,8 +3083,9 @@ async def admin_user_management(message: Message, state: FSMContext):
         if not found:
             return await message.answer(
                 "❌ Активный игрок с таким ID не найден.\n"
-                "Попробуй скопировать полный ID из профиля (например: 123456789_1)",
-                reply_markup=await main_menu_keyboard(message.from_user.username, await get_uid(message))
+                "Попробуй скопировать полный ID из профиля (например: `123456789_1`)",
+                reply_markup=await main_menu_keyboard(message.from_user.username, await get_uid(message)),
+                parse_mode="Markdown"
             )
 
         if len(found) > 1:
@@ -4961,9 +5119,15 @@ async def main():
     print("📌 Плей-офф: 1/8, 1/4, 1/2, Финал")
     print("📌 Игрок играет матчи еврокубков при trust ≥ 21")
     print("📌 В плей-офф есть доп. время и пенальти")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
