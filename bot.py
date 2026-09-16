@@ -2490,7 +2490,11 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
     fixtures = euro_data[tournament]["fixtures"].get(my_club, [])
     all_played = all(f.get("played", False) for f in fixtures) and len(fixtures) >= EURO_TOTAL_TOURS
 
-        playoff_text = ""
+            # Проверяем завершение группового этапа
+    fixtures = euro_data[tournament]["fixtures"].get(my_club, [])
+    all_played = all(f.get("played", False) for f in fixtures) and len(fixtures) >= EURO_TOTAL_TOURS
+
+    playoff_text = ""
     if all_played:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
@@ -2506,6 +2510,33 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
         else:
             playoff_text = "\n\n😔 **К сожалению, ты вылетел из еврокубков.**"
             p["euro_tournament"] = "none"
+
+    players[user_id] = p
+    await save_data(PLAYERS_FILE, players)
+
+    text = (
+        f"🏁 **МАТЧ ЗАВЕРШЕН!**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚔️ **{p['club']} {match['my_score']} : {match['opponent_score']} {match['opponent']}**\n"
+        f"{result_text}\n\n"
+        "📊 **Твоя статистика:**\n"
+        f"⚽ Голы: {match.get('goals', 0)}\n"
+        f"🅰️ Ассисты: {match.get('assists', 0)}\n"
+        f"🧤 Сейвы: {match.get('saves', 0)}\n"
+        f"🛡️ Отборы: {match.get('tackles', 0)}\n\n"
+        f"💰 Призовые: +{prize}$\n"
+        f"📈 Рейтинг: {p['rating']} ({'+' if rating_bonus >= 0 else ''}{round(rating_bonus, 1)})"
+        f"{playoff_text}"
+    )
+
+    await state.clear()
+    kb = await main_menu_keyboard(callback.from_user.username, user_id)
+    try:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except Exception:
+        if callback.message.photo:
+            await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
