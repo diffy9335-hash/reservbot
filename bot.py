@@ -1303,7 +1303,7 @@ async def euro_menu_handler(callback: CallbackQuery):
                 result = "✅ Победа" if gf > ga else ("🤝 Ничья" if gf == ga else "❌ Поражение")
             text += f"{status} Тур {i}: {home} {f['opponent']} {result}\n"
 
-    buttons = []
+        buttons = []
 
     next_match = next((f for f in fixtures if not f.get("played", False)), None)
 
@@ -1319,7 +1319,13 @@ async def euro_menu_handler(callback: CallbackQuery):
                                              callback_data="euro_group_results")])
 
     if euro_data.get("status") == "playoff":
-        buttons.append([InlineKeyboardButton(text="🏆 Плей-офф", callback_data="euro_playoff_menu")])
+        # Если игрок ещё в турнире — сразу даём кнопку плей-офф
+        if p.get("euro_tournament") and p.get("euro_tournament") != "none" \
+                and p.get("euro_playoff_stage") not in (None, "eliminated"):
+            buttons.append([InlineKeyboardButton(text="🏆 Плей-офф (сыграть матч)",
+                                                 callback_data="euro_playoff_menu")])
+        else:
+            buttons.append([InlineKeyboardButton(text="🏆 Плей-офф", callback_data="euro_playoff_menu")])
 
     buttons.append([InlineKeyboardButton(text="📊 Полная таблица", callback_data="euro_table_full")])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")])
@@ -1717,24 +1723,31 @@ async def euro_group_results_handler(callback: CallbackQuery):
     text += "━━━━━━━━━━━━━━━━━━━━\n"
     text += f"📈 Твое место: {position if position else '?'} из {len(euro_data[tournament]['table'])}\n\n"
 
+    progressed = False
     if position and position <= 8:
         text += "🎉 **Поздравляю!**\nТы напрямую прошел в 1/8 финала!"
         p["euro_playoff_stage"] = "round_16"
+        progressed = True
     elif position and position <= 24:
-        text += "⚔️ **Стыковые матчи!**\nТы сыграешь за выход в 1/8 финала."
-        p["euro_playoff_stage"] = "playoff"
+        text += "⚔️ **Стыковые матчи пройдены!**\nТы вышел в 1/8 финала."
+        p["euro_playoff_stage"] = "round_16"
+        progressed = True
     else:
         text += "😔 **Вылет из еврокубков.**\nСосредоточься на следующем сезоне!"
         p["euro_tournament"] = "none"
+        p["euro_playoff_stage"] = "eliminated"
 
     players = await load_data(PLAYERS_FILE)
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Полная таблица", callback_data="euro_table_full")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
-    ])
+    buttons = []
+    if progressed:
+        buttons.append([InlineKeyboardButton(text="🏆 Перейти к плей-офф", callback_data="euro_playoff_menu")])
+    buttons.append([InlineKeyboardButton(text="📊 Полная таблица", callback_data="euro_table_full")])
+    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     if callback.message.photo:
         await callback.message.delete()
@@ -1765,6 +1778,14 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     euro_info = EURO_TOURNAMENTS.get(tournament, {})
 
     current_stage = p.get("euro_playoff_stage", "round_16")
+
+    # Если у игрока стоит "playoff" (старый формат) — переводим в round_16
+    if current_stage == "playoff":
+        current_stage = "round_16"
+        p["euro_playoff_stage"] = "round_16"
+        players_tmp = await load_data(PLAYERS_FILE)
+        players_tmp[user_id] = p
+        await save_data(PLAYERS_FILE, players_tmp)
 
     if current_stage == "eliminated" or p.get("euro_tournament") == "none":
         await callback.message.edit_text(
@@ -1833,7 +1854,6 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     else:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-
 
 @dp.callback_query(F.data == "euro_simulate_round16")
 @with_user_lock
@@ -2470,7 +2490,7 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
     fixtures = euro_data[tournament]["fixtures"].get(my_club, [])
     all_played = all(f.get("played", False) for f in fixtures) and len(fixtures) >= EURO_TOTAL_TOURS
 
-    playoff_text = ""
+        playoff_text = ""
     if all_played:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
@@ -2481,8 +2501,8 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
             playoff_text = "\n\n🎉 **Ты прошел напрямую в 1/8 финала!**"
             p["euro_playoff_stage"] = "round_16"
         elif position and position <= 24:
-            playoff_text = "\n\n⚔️ **Ты попал в стыковые матчи!**"
-            p["euro_playoff_stage"] = "playoff"
+            playoff_text = "\n\n⚔️ **Ты прошел стыковые матчи и попал в 1/8 финала!**"
+            p["euro_playoff_stage"] = "round_16"
         else:
             playoff_text = "\n\n😔 **К сожалению, ты вылетел из еврокубков.**"
             p["euro_tournament"] = "none"
