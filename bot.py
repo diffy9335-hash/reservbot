@@ -13,7 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8979310355:AAHyNdXMeqNssz741ARifPC89lVnUknN7IUY"
+BOT_TOKEN = "8979310355:AAEJ5gMJUZgyJjy98oRdiO1DZU1xtpiH9Bk"
 
 SPONSOR_CHANNEL_ID = "@jdoauqh"
 SPONSOR_CHANNEL_URL = "https://t.me/jdoauqh"
