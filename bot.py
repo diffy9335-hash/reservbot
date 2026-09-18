@@ -773,102 +773,121 @@ async def determine_euro_participants(season):
 
 def generate_swiss_fixtures(clubs):
     """
-    Симметричное расписание: каждая пара играет ровно один матч,
+    Симметричное расписание: каждая пара играет ровно один раз,
     у каждого клуба ровно EURO_TOTAL_TOURS матчей (по 1 в каждом туре).
+    Гарантирует полное покрытие — если у кого-то матчей меньше, добирает пары.
     """
     if len(clubs) < 8:
         return {}
 
+    # Убираем дубли и добиваемся чётного числа клубов
+    clubs = list(dict.fromkeys(clubs))
+    if len(clubs) % 2 != 0:
+        clubs = clubs[:-1]
+    n = len(clubs)
+    if n < 8:
+        return {}
+
     fixtures = {club: [] for club in clubs}
 
+    # Разбиваем на корзины по рейтингу
     club_ratings = {club: CLUB_RATINGS.get(club, 50) for club in clubs}
     sorted_clubs = sorted(clubs, key=lambda x: club_ratings[x], reverse=True)
 
     num_pots = 4
-    pot_size = max(1, len(sorted_clubs) // num_pots)
-    pots = {}
+    pot_size = n // num_pots
+    pots = []
     for i in range(num_pots):
         start = i * pot_size
-        end = min((i + 1) * pot_size, len(sorted_clubs))
-        pots[i + 1] = sorted_clubs[start:end]
+        end = (i + 1) * pot_size if i < num_pots - 1 else n
+        pots.append(sorted_clubs[start:end])
 
-    # Собираем для каждого клуба список из 8 соперников
-    club_opponents = {}
-    for club in clubs:
-        opponents = []
-        country = get_club_country(club)
-        for pot_num in [1, 2, 3, 4]:
-            available = [c for c in pots.get(pot_num, [])
-                         if c != club and c not in opponents and get_club_country(c) != country]
-            if len(available) < 2:
-                available = [c for c in pots.get(pot_num, [])
-                             if c != club and c not in opponents]
-            random.shuffle(available)
-            opponents.extend(available[:2])
-        while len(opponents) < EURO_TOTAL_TOURS:
-            pool = [c for c in clubs if c != club and c not in opponents]
-            if not pool:
-                break
-            opponents.append(random.choice(pool))
-        club_opponents[club] = opponents[:EURO_TOTAL_TOURS]
+    pot_index = {}
+    for idx, pot in enumerate(pots):
+        for c in pot:
+            pot_index[c] = idx
 
-    # Формируем множество пар
-    pair_set = set()
-    for club in clubs:
-        for opp in club_opponents[club]:
-            pair_set.add(tuple(sorted([club, opp])))
+    # Все возможные пары
+    all_pairs = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            all_pairs.append((clubs[i], clubs[j]))
 
-    pair_home = {}
-    for a, b in pair_set:
-        pair_home[(a, b)] = random.choice([True, False])
+    # Приоритет: разные корзины + разные страны
+    def pair_priority(pair):
+        a, b = pair
+        pot_a, pot_b = pot_index[a], pot_index[b]
+        same_country = 1 if get_club_country(a) == get_club_country(b) else 0
+        return (-abs(pot_a - pot_b), same_country)
 
+    all_pairs.sort(key=pair_priority)
+
+    tour_matches = {t: [] for t in range(1, EURO_TOTAL_TOURS + 1)}
     tour_used = {club: [False] * (EURO_TOTAL_TOURS + 1) for club in clubs}
-    pair_tour = {}
+    matches_per_club = {club: 0 for club in clubs}
+    played_pairs = set()
 
-    pairs_list = list(pair_set)
-    random.shuffle(pairs_list)
-    # Сортируем так, чтобы сначала шли «сложные» пары — где меньше всего вариантов.
-    # Простая эвристика: сортируем по количеству уже занятых слотов у обоих клубов (по возрастанию).
-    pairs_list.sort(key=lambda pair: sum(tour_used[pair[0]][1:]) + sum(tour_used[pair[1]][1:]))
+    # Первый проход: жадно распределяем пары по турам
+    for a, b in all_pairs:
+        if matches_per_club[a] >= EURO_TOTAL_TOURS or matches_per_club[b] >= EURO_TOTAL_TOURS:
+            continue
+        candidate_tours = [t for t in range(1, EURO_TOTAL_TOURS + 1)
+                           if not tour_used[a][t] and not tour_used[b][t]]
+        if not candidate_tours:
+            continue
+        t = random.choice(candidate_tours)
+        tour_used[a][t] = True
+        tour_used[b][t] = True
+        matches_per_club[a] += 1
+        matches_per_club[b] += 1
+        tour_matches[t].append((a, b))
+        played_pairs.add(tuple(sorted([a, b])))
 
-    for a, b in pairs_list:
-        placed = False
-        # Пробуем туры от 1 до 8
-        candidate_tours = list(range(1, EURO_TOTAL_TOURS + 1))
-        random.shuffle(candidate_tours)
-        for t in candidate_tours:
-            if not tour_used[a][t] and not tour_used[b][t]:
+    # Второй проход: если у кого-то меньше 8 матчей — добираем парами между «недобравшими»
+    for _ in range(3):  # несколько попыток
+        missing = [c for c in clubs if matches_per_club[c] < EURO_TOTAL_TOURS]
+        if not missing:
+            break
+        random.shuffle(missing)
+        for i in range(len(missing)):
+            for j in range(i + 1, len(missing)):
+                a, b = missing[i], missing[j]
+                if matches_per_club[a] >= EURO_TOTAL_TOURS or matches_per_club[b] >= EURO_TOTAL_TOURS:
+                    continue
+                if tuple(sorted([a, b])) in played_pairs:
+                    continue
+                candidate_tours = [t for t in range(1, EURO_TOTAL_TOURS + 1)
+                                   if not tour_used[a][t] and not tour_used[b][t]]
+                if not candidate_tours:
+                    continue
+                t = random.choice(candidate_tours)
                 tour_used[a][t] = True
                 tour_used[b][t] = True
-                pair_tour[(a, b)] = t
-                placed = True
-                break
-        if not placed:
-            continue
+                matches_per_club[a] += 1
+                matches_per_club[b] += 1
+                tour_matches[t].append((a, b))
+                played_pairs.add(tuple(sorted([a, b])))
 
-    for (a, b), t in pair_tour.items():
-        a_home = pair_home[(a, b)]
-        fixtures[a].append({
-            "opponent": b,
-            "home": a_home,
-            "tour": t,
-            "played": False,
-            "goals_for": 0,
-            "goals_against": 0,
-            "result": None
-        })
-        fixtures[b].append({
-            "opponent": a,
-            "home": not a_home,
-            "tour": t,
-            "played": False,
-            "goals_for": 0,
-            "goals_against": 0,
-            "result": None
-        })
+    # Строим fixtures
+    for t, pairs in tour_matches.items():
+        for a, b in pairs:
+            a_home = random.choice([True, False])
+            fixtures[a].append({
+                "opponent": b, "home": a_home, "tour": t,
+                "played": False, "goals_for": 0, "goals_against": 0, "result": None
+            })
+            fixtures[b].append({
+                "opponent": a, "home": not a_home, "tour": t,
+                "played": False, "goals_for": 0, "goals_against": 0, "result": None
+            })
 
     for club in fixtures:
         fixtures[club].sort(key=lambda m: m["tour"])
+
+    # Логируем, если у кого-то не 8 матчей — для отладки
+    for club, matches in fixtures.items():
+        if len(matches) != EURO_TOTAL_TOURS:
+            logging.warning(f"EURO FIXTURES: у {club} {len(matches)} матчей вместо {EURO_TOTAL_TOURS}")
 
     return fixtures
 
