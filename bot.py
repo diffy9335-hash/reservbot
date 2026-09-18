@@ -2004,10 +2004,11 @@ async def euro_simulate_match_handler(callback: CallbackQuery):
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
-    fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
+        fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
     all_played = all(f.get("played", False) for f in fixtures)
     extra = ""
-        if all_played:
+
+    if all_played:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
         await save_data(EURO_FILE, euro_data)
@@ -2016,16 +2017,17 @@ async def euro_simulate_match_handler(callback: CallbackQuery):
         if position and position <= 8:
             p["euro_playoff_stage"] = "round_16"
             p["playoff_round_played"] = True  # топ-8 не играют стыки
-            playoff_text = "\n\n🎉 **Ты прошел напрямую в 1/8 финала!**"
+            extra = "\n\n🎉 Ты прошел напрямую в 1/8 финала!"
         elif position and position <= 24:
             p["euro_playoff_stage"] = "playoff_round"
-            playoff_text = "\n\n⚔️ **Ты попал в стыковые матчи!**"
+            extra = "\n\n⚔️ Ты попал в стыковые матчи!"
         else:
             p["euro_tournament"] = "none"
             p["euro_playoff_stage"] = "eliminated"
-            playoff_text = "\n\n😔 **Ты вылетел из еврокубков.**"
-        players[user_id] = p
-        await save_data(PLAYERS_FILE, players)
+            extra = "\n\n😔 Ты вылетел из еврокубков."
+
+    players[user_id] = p
+    await save_data(PLAYERS_FILE, players)
 
     await callback.message.edit_text(
         f"📊 **МАТЧ СИМУЛИРОВАН!**\n"
