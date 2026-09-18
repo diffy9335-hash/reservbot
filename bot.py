@@ -1993,7 +1993,10 @@ async def euro_menu_handler(callback: CallbackQuery):
         await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     else:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        try:
+            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except TelegramBadRequest:
+            pass
 
 
 @dp.callback_query(F.data == "euro_simulate_match")
@@ -2541,7 +2544,10 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
         await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     else:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        try:
+            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except TelegramBadRequest:
+            pass
 
 
 @dp.callback_query(F.data == "euro_simulate_round16")
