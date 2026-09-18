@@ -2004,11 +2004,11 @@ async def euro_simulate_match_handler(callback: CallbackQuery):
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
-        fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
+    fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
     all_played = all(f.get("played", False) for f in fixtures)
-    extra = ""
 
-    if all_played:
+    extra = ""
+    if all_played and len(fixtures) >= EURO_TOTAL_TOURS:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
         await save_data(EURO_FILE, euro_data)
@@ -2016,8 +2016,8 @@ async def euro_simulate_match_handler(callback: CallbackQuery):
 
         if position and position <= 8:
             p["euro_playoff_stage"] = "round_16"
-            p["playoff_round_played"] = True  # топ-8 не играют стыки
-            extra = "\n\n🎉 Ты прошел напрямую в 1/8 финала!"
+            p["playoff_round_played"] = True
+            extra = "\n\n🎉 Ты прошёл в 1/8 финала!"
         elif position and position <= 24:
             p["euro_playoff_stage"] = "playoff_round"
             extra = "\n\n⚔️ Ты попал в стыковые матчи!"
@@ -2026,8 +2026,8 @@ async def euro_simulate_match_handler(callback: CallbackQuery):
             p["euro_playoff_stage"] = "eliminated"
             extra = "\n\n😔 Ты вылетел из еврокубков."
 
-    players[user_id] = p
-    await save_data(PLAYERS_FILE, players)
+        players[user_id] = p
+        await save_data(PLAYERS_FILE, players)
 
     await callback.message.edit_text(
         f"📊 **МАТЧ СИМУЛИРОВАН!**\n"
@@ -2586,10 +2586,10 @@ async def euro_simulate_playoff_match(callback: CallbackQuery, stage: str):
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
-        if stage in ["round_16", "quarter", "semi"]:
+    if stage in ["round_16", "quarter", "semi"]:
         await advance_playoff_round(
             euro_data, tournament, stage,
-            player_club=p["club"], player_won=won
+            player_club=p["club"], player_won=(winner == p["club"])
         )
     elif stage == "playoff_round":
         # Стыки уже обработаны выше
@@ -3196,7 +3196,7 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
     all_played = all(f.get("played", False) for f in fixtures) and len(fixtures) >= EURO_TOTAL_TOURS
 
     playoff_text = ""
-        if all_played:
+    if all_played:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
         await save_data(EURO_FILE, euro_data)
