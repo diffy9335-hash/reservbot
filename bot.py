@@ -869,7 +869,9 @@ async def calculate_player_awards(user_id, season_num):
             return 80
         if "🥇 золотой мяч" in t or "🧤 золотая перчатка" in t:
             return 0
-        return 30    club_scores = {}
+        return 30
+
+    club_scores = {}
 
     for uid, pdata in players.items():
         if pdata.get("retired"):
