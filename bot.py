@@ -655,33 +655,48 @@ def generate_npc_player(club_rating, position):
 
 
 def generate_npc_stats(player, club_rating, season_length=30):
+    """
+    Генерирует статистику NPC за сезон.
+    ВАЖНО: статы ограничены реалистичными рамками,
+    как у реального игрока (30 матчей × 2-4 момента).
+    """
     pos = player["position"]
     rating = player["rating"]
 
-    power = (rating / 60) * (club_rating / 60)
-    power = max(0.3, min(2.5, power))
-
     games = random.randint(int(season_length * 0.7), season_length)
 
+    # Коэффициент силы игрока (0.4 – 1.3)
+    skill = rating / 70.0
+    skill = max(0.4, min(1.3, skill))
+
     if pos == "ST":
-        goals = int(random.randint(5, 18) * power)
-        assists = int(random.randint(2, 8) * power)
+        max_goals = int(games * 0.9)
+        max_assists = int(games * 0.5)
+        goals = random.randint(0, max(1, int(max_goals * skill)))
+        assists = random.randint(0, max(1, int(max_assists * skill)))
         saves = 0
         tackles = 0
     elif pos == "CM":
-        goals = int(random.randint(2, 10) * power)
-        assists = int(random.randint(5, 16) * power)
+        max_goals = int(games * 0.4)
+        max_assists = int(games * 0.7)
+        max_tackles = int(games * 1.2)
+        goals = random.randint(0, max(1, int(max_goals * skill)))
+        assists = random.randint(0, max(1, int(max_assists * skill)))
         saves = 0
-        tackles = int(random.randint(10, 35) * power)
+        tackles = random.randint(0, max(1, int(max_tackles * skill)))
     elif pos == "CB":
-        goals = int(random.randint(0, 4) * power)
-        assists = int(random.randint(0, 3) * power)
+        max_goals = int(games * 0.15)
+        max_assists = int(games * 0.1)
+        max_tackles = int(games * 2.5)
+        goals = random.randint(0, max(1, int(max_goals * skill)))
+        assists = random.randint(0, max(1, int(max_assists * skill)))
         saves = 0
-        tackles = int(random.randint(40, 100) * power)
+        tackles = random.randint(int(max_tackles * 0.3), max(1, int(max_tackles * skill)))
     elif pos == "GK":
+        max_saves = int(games * 3.5)
         goals = 0
         assists = 0
-        saves = int(random.randint(50, 130) * power)
+        saves = random.randint(int(max_saves * 0.3), max(1, int(max_saves * skill)))
         tackles = 0
     else:
         goals = assists = saves = tackles = 0
@@ -715,6 +730,48 @@ async def generate_all_npc_players(season_num):
 
     await save_data(NPC_FILE, {"season": season_num, "data": npc_data})
     return npc_data
+
+
+async def get_league_players(division, exclude_user_id=None):
+    """
+    Возвращает список всех игроков лиги:
+    реальные (активные) + NPC.
+    """
+    players = await load_data(PLAYERS_FILE)
+    npc_data = await generate_all_npc_players(1)
+
+    result = []
+
+    for uid, pdata in players.items():
+        if pdata.get("retired"):
+            continue
+        if pdata.get("division") != division:
+            continue
+
+        result.append({
+            "name": pdata["name"],
+            "position": pdata.get("position", "ST"),
+            "club": pdata.get("club"),
+            "rating": pdata.get("rating", 40),
+            "stats": pdata.get("stats_season", {}),
+            "is_player": True,
+            "user_id": uid,
+        })
+
+    for club, npc_list in npc_data.items():
+        for npc in npc_list:
+            if npc.get("division") != division:
+                continue
+            result.append({
+                "name": npc["name"],
+                "position": npc["position"],
+                "club": club,
+                "rating": npc["rating"],
+                "stats": npc["stats"],
+                "is_player": False,
+            })
+
+    return result
 
 
 async def calculate_player_awards(user_id, season_num):
@@ -758,6 +815,8 @@ async def calculate_player_awards(user_id, season_num):
             s.get("assists", 0) * 2 +
             c["trophies"] * 15
         )
+        if c.get("is_player"):
+            score += 50
         zm.append({**c, "score": round(score, 1)})
     golden_ball = max(zm, key=lambda x: x["score"]) if zm else None
 
@@ -783,18 +842,129 @@ async def calculate_player_awards(user_id, season_num):
     ]
     best_assistant = max(la, key=lambda x: x["score"]) if la else None
 
+    # --- ЛУЧШИЙ КЛУБ (учитываем очки, дивизион, трофеи, еврокубки) ---
     tables = await load_data(TABLES_FILE)
-    best_club = None
-    if user_id in tables and p["division"] in tables[user_id]:
-        table = tables[user_id][p["division"]]
-        if table:
-            top = max(table, key=lambda r: r["points"] * 2 + r["wins"] * 3)
-            best_club = {
-                "club": top["club"],
-                "points": top["points"],
-                "wins": top["wins"],
-                "score": top["points"] * 2 + top["wins"] * 3
+    euro_data = await load_data(EURO_FILE)
+
+    DIVISION_WEIGHT = {
+        "АПЛ": 100, "Ла Лига": 100, "Серия А": 100, "Бундеслига": 100,
+        "Лига 1": 95, "РПЛ": 90, "Примейра": 90, "Эредивизи": 85,
+        "Бразильская Серия А": 85, "Jupiler Pro League": 80,
+        "Турция Суперлига": 80, "Казахстан Премьер-лига": 60,
+        "Беларусь Высшая лига": 55,
+        "ФНЛ": 50, "Лига 2": 50, "Чемпионшип": 55, "Сегунда": 50,
+        "Серия Б": 50, "Вторая Бундеслига": 50, "Сегунда лига": 45,
+        "Эрстедивизи": 45, "Беларусь Первая лига": 35,
+        "Турция Первая лига": 40,
+        "ФНЛ 2": 25, "Насьональ": 25, "Первая лига Англии": 30,
+    }
+
+    def trophy_weight(trophy: str) -> int:
+        t = trophy.lower()
+        if "лига чемпионов" in t:
+            return 500
+        if "лига европы" in t:
+            return 350
+        if "лига конференций" in t:
+            return 200
+        if "🥇 чемпион" in t:
+            return 150
+        if "🏆 кубок" in t:
+            return 120
+        if "⬆️ выход" in t:
+            return 80
+        if "🥇 золотой мяч" in t or "🧤 золотая перчатка" in t:
+            return 0
+        return 30
+
+    club_scores = {}
+
+    for uid, pdata in players.items():
+        if pdata.get("retired"):
+            continue
+        club = pdata.get("club")
+        division = pdata.get("division")
+        if not club or not division:
+            continue
+        if uid not in tables or division not in tables[uid]:
+            continue
+
+        table = tables[uid][division]
+        row = next((r for r in table if r["club"] == club), None)
+        if not row:
+            continue
+
+        points = row["points"]
+        wins = row["wins"]
+
+        club_trophies = pdata.get("trophies", [])
+        trophy_score = sum(trophy_weight(t) for t in club_trophies)
+
+        div_weight = DIVISION_WEIGHT.get(division, 30)
+
+        euro_bonus = 0
+        if euro_data:
+            tournament = pdata.get("euro_tournament")
+            if tournament and tournament != "none" and tournament in euro_data:
+                euro_bonus += 100
+                if euro_data.get("status") == "playoff":
+                    euro_bonus += 150
+                stage = pdata.get("euro_playoff_stage")
+                if stage == "round_16":
+                    euro_bonus += 100
+                elif stage == "quarter":
+                    euro_bonus += 200
+                elif stage == "semi":
+                    euro_bonus += 350
+                elif stage == "final":
+                    euro_bonus += 500
+
+        score = (
+            points * 2 +
+            wins * 3 +
+            div_weight * 2 +
+            trophy_score +
+            euro_bonus
+        )
+
+        if club not in club_scores or score > club_scores[club]["score"]:
+            club_scores[club] = {
+                "club": club,
+                "points": points,
+                "wins": wins,
+                "division": division,
+                "trophies": len(club_trophies),
+                "euro_bonus": euro_bonus,
+                "score": score
             }
+
+    for club, npc_list in npc_data.items():
+        if club in club_scores:
+            continue
+        division = None
+        for d, clubs in CLUBS.items():
+            if club in clubs:
+                division = d
+                break
+        if not division:
+            continue
+
+        club_rating = CLUB_RATINGS.get(club, 50)
+        div_weight = DIVISION_WEIGHT.get(division, 30)
+
+        score = club_rating * 1.5 + div_weight * 2
+
+        club_scores[club] = {
+            "club": club,
+            "points": 0,
+            "wins": 0,
+            "division": division,
+            "trophies": 0,
+            "euro_bonus": 0,
+            "score": score
+        }
+
+    best_club = max(club_scores.values(), key=lambda x: x["score"]) if club_scores else None
 
     awards = {
         "season": season_num,
@@ -1299,6 +1469,10 @@ async def simulate_euro_playoff_match(club1, club2):
         return goals1, goals2, club2
 
 
+async def simulate_euro_playoff_match_pair(club1, club2):
+    return await simulate_euro_playoff_match(club1, club2)
+
+
 async def generate_euro_playoffs(euro_data, tournament):
     table = euro_data[tournament]["table"]
     sorted_table = sorted(
@@ -1412,6 +1586,7 @@ async def main_menu_keyboard(username: str = None, user_id: str = None):
         [InlineKeyboardButton(text="🎯 Квесты", callback_data="menu_quests"),
          InlineKeyboardButton(text="💰 Спонсоры", callback_data="menu_sponsors")],
         [InlineKeyboardButton(text="🏆 Номинации сезона", callback_data="menu_awards")],
+        [InlineKeyboardButton(text="📊 Статистика лиги", callback_data="menu_league_stats")],
         [InlineKeyboardButton(text="🟢 Онлайн / Топ", callback_data="menu_online")]
     ]
 
@@ -1434,6 +1609,249 @@ async def send_auto_delete_message(message: Message, text: str, parse_mode: str 
         await sent.delete()
     except Exception:
         pass
+
+
+# ============================================================
+# НОМИНАЦИИ СЕЗОНА
+# ============================================================
+
+@dp.callback_query(F.data == "menu_awards")
+@with_user_lock
+async def awards_menu_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+
+    all_awards = await load_data(AWARDS_FILE)
+    player_awards = all_awards.get(user_id, {})
+
+    if not player_awards:
+        await callback.message.edit_text(
+            "🏆 **НОМИНАЦИИ СЕЗОНА**\n\n"
+            "Номинации за этот сезон ещё не подведены.\n"
+            "Они появятся после завершения сезона!",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
+            ])
+        )
+        return
+
+    latest = sorted(player_awards.keys(), key=lambda x: int(x.split("_")[1]))[-1]
+    awards = player_awards[latest]
+    season_num = latest.split("_")[1]
+
+    text = f"🏆 **НОМИНАЦИИ СЕЗОНА {season_num}**\n━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    if awards.get("best_club"):
+        bc = awards["best_club"]
+        text += f"🏟 **Лучший клуб:** {bc['club']}\n"
+        text += f"   Очки: {bc['points']} | Победы: {bc['wins']}\n"
+        if bc.get("division"):
+            text += f"   Дивизион: {bc['division']}\n"
+        if bc.get("trophies"):
+            text += f"   Трофеев: {bc['trophies']}\n"
+        if bc.get("euro_bonus"):
+            text += f"   Еврокубки: +{bc['euro_bonus']} очков\n"
+        text += "\n"
+
+    if awards.get("golden_ball"):
+        gb = awards["golden_ball"]
+        mark = "⭐ " if gb.get("is_player") else ""
+        text += f"🥇 **Золотой мяч:** {mark}{gb['name']} ({gb['club']})\n"
+        text += f"   Рейтинг: {gb['rating']} | Голы: {gb['stats'].get('goals', 0)} | Ассисты: {gb['stats'].get('assists', 0)}\n\n"
+
+    if awards.get("golden_glove"):
+        gg = awards["golden_glove"]
+        mark = "⭐ " if gg.get("is_player") else ""
+        text += f"🧤 **Золотая перчатка:** {mark}{gg['name']} ({gg['club']})\n"
+        text += f"   Сейвы: {gg['stats'].get('saves', 0)} | Рейтинг: {gg['rating']}\n\n"
+
+    if awards.get("best_defender"):
+        bd = awards["best_defender"]
+        mark = "⭐ " if bd.get("is_player") else ""
+        text += f"🛡️ **Лучший защитник:** {mark}{bd['name']} ({bd['club']})\n"
+        text += f"   Отборы: {bd['stats'].get('tackles', 0)} | Рейтинг: {bd['rating']}\n\n"
+
+    if awards.get("best_assistant"):
+        ba = awards["best_assistant"]
+        mark = "⭐ " if ba.get("is_player") else ""
+        text += f"🅰️ **Лучший ассистент:** {mark}{ba['name']} ({ba['club']})\n"
+        text += f"   Ассисты: {ba['stats'].get('assists', 0)} | Рейтинг: {ba['rating']}\n"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📜 Прошлые сезоны", callback_data="awards_history")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
+    ])
+
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+
+@dp.callback_query(F.data == "awards_history")
+@with_user_lock
+async def awards_history_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    all_awards = await load_data(AWARDS_FILE)
+    player_awards = all_awards.get(user_id, {})
+
+    if not player_awards:
+        await callback.answer("Пока нет данных", show_alert=True)
+        return
+
+    text = "📜 **ИСТОРИЯ НОМИНАЦИЙ**\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    for season_key in sorted(player_awards.keys(), key=lambda x: int(x.split("_")[1])):
+        season_num = season_key.split("_")[1]
+        awards = player_awards[season_key]
+        text += f"**Сезон {season_num}:**\n"
+        if awards.get("golden_ball"):
+            gb = awards["golden_ball"]
+            mark = "⭐ " if gb.get("is_player") else ""
+            text += f"🥇 ЗМ: {mark}{gb['name']}\n"
+        if awards.get("golden_glove"):
+            gg = awards["golden_glove"]
+            mark = "⭐ " if gg.get("is_player") else ""
+            text += f"🧤 ЗП: {mark}{gg['name']}\n"
+        if awards.get("best_defender"):
+            bd = awards["best_defender"]
+            mark = "⭐ " if bd.get("is_player") else ""
+            text += f"🛡️ ЛЗ: {mark}{bd['name']}\n"
+        if awards.get("best_assistant"):
+            ba = awards["best_assistant"]
+            mark = "⭐ " if ba.get("is_player") else ""
+            text += f"🅰️ ЛА: {mark}{ba['name']}\n"
+        if awards.get("best_club"):
+            text += f"🏟 Клуб: {awards['best_club']['club']}\n"
+        text += "\n"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_awards")]
+    ])
+    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+
+# ============================================================
+# СТАТИСТИКА ЛИГИ
+# ============================================================
+
+@dp.callback_query(F.data == "menu_league_stats")
+@with_user_lock
+async def league_stats_menu_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+
+    division = p.get("division", "ФНЛ 2")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚽ Бомбардиры", callback_data="league_top:goals"),
+         InlineKeyboardButton(text="🅰️ Ассистенты", callback_data="league_top:assists")],
+        [InlineKeyboardButton(text="🧤 Вратари (сейвы)", callback_data="league_top:saves"),
+         InlineKeyboardButton(text="🛡️ Защитники (отборы)", callback_data="league_top:tackles")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
+    ])
+
+    text = (
+        f"📊 **СТАТИСТИКА ЛИГИ: {division}**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "Выбери, что хочешь посмотреть:\n\n"
+        "⚽ **Бомбардиры** — топ по голам\n"
+        "🅰️ **Ассистенты** — топ по голевым пасам\n"
+        "🧤 **Вратари** — топ по сейвам\n"
+        "🛡️ **Защитники** — топ по отборам"
+    )
+
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("league_top:"))
+@with_user_lock
+async def league_top_handler(callback: CallbackQuery):
+    user_id = await get_uid(callback)
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+
+    stat_type = callback.data.split(":")[1]
+    division = p.get("division", "ФНЛ 2")
+
+    all_players = await get_league_players(division, exclude_user_id=user_id)
+
+    if stat_type == "saves":
+        candidates = [x for x in all_players if x["position"] == "GK"]
+        stat_label = "СЕЙВЫ"
+        stat_key = "saves"
+        stat_emoji = "🧤"
+    elif stat_type == "tackles":
+        candidates = [x for x in all_players if x["position"] == "CB"]
+        stat_label = "ОТБОРЫ"
+        stat_key = "tackles"
+        stat_emoji = "🛡️"
+    elif stat_type == "assists":
+        candidates = all_players
+        stat_label = "АССИСТЫ"
+        stat_key = "assists"
+        stat_emoji = "🅰️"
+    else:
+        candidates = all_players
+        stat_label = "ГОЛЫ"
+        stat_key = "goals"
+        stat_emoji = "⚽"
+
+    candidates = sorted(
+        candidates,
+        key=lambda x: x["stats"].get(stat_key, 0),
+        reverse=True
+    )
+
+    player_position = None
+    for i, c in enumerate(candidates, 1):
+        if c.get("is_player") and c.get("user_id") == user_id:
+            player_position = i
+            break
+
+    text = f"{stat_emoji} **ТОП-15 {stat_label}**\n"
+    text += f"📊 Лига: **{division}**\n"
+    text += "━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    medals = ["🥇", "🥈", "🥉"] + ["🏅"] * 12
+    for i, c in enumerate(candidates[:15], 1):
+        value = c["stats"].get(stat_key, 0)
+        club = c.get("club", "—")
+        is_me = c.get("is_player") and c.get("user_id") == user_id
+        marker = "👉 " if is_me else ""
+        name_display = f"**{c['name']}**" if is_me else c['name']
+        text += f"{medals[i-1]} {marker}{name_display} ({club}) — **{value}**\n"
+
+    if player_position and player_position > 15:
+        player_data = next((c for c in candidates if c.get("is_player") and c.get("user_id") == user_id), None)
+        if player_data:
+            value = player_data["stats"].get(stat_key, 0)
+            text += f"\n━━━━━━━━━━━━━━━━━━━━\n"
+            text += f"👉 **Ты:** {player_position} место — {value} {stat_key}\n"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 К выбору", callback_data="menu_league_stats")],
+        [InlineKeyboardButton(text="🏠 Меню", callback_data="back_to_menu")]
+    ])
+
+    if callback.message.photo:
+        await callback.message.delete()
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        try:
+            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 
 # ============================================================
@@ -2056,10 +2474,6 @@ async def euro_simulate_semi_handler(callback: CallbackQuery):
 @with_user_lock
 async def euro_simulate_final_handler(callback: CallbackQuery):
     await euro_simulate_playoff_match(callback, "final")
-
-
-async def simulate_euro_playoff_match_pair(club1, club2):
-    return await simulate_euro_playoff_match(club1, club2)
 
 
 async def euro_simulate_playoff_match(callback: CallbackQuery, stage: str):
@@ -2955,122 +3369,6 @@ async def leaderboard_handler(callback: CallbackQuery):
     except Exception as e:
         logging.warning(f"leaderboard_handler send error: {e}")
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-
-
-# ============================================================
-# НОМИНАЦИИ СЕЗОНА
-# ============================================================
-
-@dp.callback_query(F.data == "menu_awards")
-@with_user_lock
-async def awards_menu_handler(callback: CallbackQuery):
-    user_id = await get_uid(callback)
-    p = (await load_data(PLAYERS_FILE)).get(user_id)
-    if await deny_if_retired_cb(callback, p):
-        return
-
-    all_awards = await load_data(AWARDS_FILE)
-    player_awards = all_awards.get(user_id, {})
-
-    if not player_awards:
-        await callback.message.edit_text(
-            "🏆 **НОМИНАЦИИ СЕЗОНА**\n\n"
-            "Номинации за этот сезон ещё не подведены.\n"
-            "Они появятся после завершения сезона!",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
-            ])
-        )
-        return
-
-    latest = sorted(player_awards.keys(), key=lambda x: int(x.split("_")[1]))[-1]
-    awards = player_awards[latest]
-    season_num = latest.split("_")[1]
-
-    text = f"🏆 **НОМИНАЦИИ СЕЗОНА {season_num}**\n━━━━━━━━━━━━━━━━━━━━\n\n"
-
-    if awards.get("best_club"):
-        bc = awards["best_club"]
-        text += f"🏟 **Лучший клуб:** {bc['club']}\n"
-        text += f"   Очки: {bc['points']} | Победы: {bc['wins']}\n\n"
-
-    if awards.get("golden_ball"):
-        gb = awards["golden_ball"]
-        mark = "⭐ " if gb.get("is_player") else ""
-        text += f"🥇 **Золотой мяч:** {mark}{gb['name']} ({gb['club']})\n"
-        text += f"   Рейтинг: {gb['rating']} | Голы: {gb['stats'].get('goals', 0)} | Ассисты: {gb['stats'].get('assists', 0)}\n\n"
-
-    if awards.get("golden_glove"):
-        gg = awards["golden_glove"]
-        mark = "⭐ " if gg.get("is_player") else ""
-        text += f"🧤 **Золотая перчатка:** {mark}{gg['name']} ({gg['club']})\n"
-        text += f"   Сейвы: {gg['stats'].get('saves', 0)} | Рейтинг: {gg['rating']}\n\n"
-
-    if awards.get("best_defender"):
-        bd = awards["best_defender"]
-        mark = "⭐ " if bd.get("is_player") else ""
-        text += f"🛡️ **Лучший защитник:** {mark}{bd['name']} ({bd['club']})\n"
-        text += f"   Отборы: {bd['stats'].get('tackles', 0)} | Рейтинг: {bd['rating']}\n\n"
-
-    if awards.get("best_assistant"):
-        ba = awards["best_assistant"]
-        mark = "⭐ " if ba.get("is_player") else ""
-        text += f"🅰️ **Лучший ассистент:** {mark}{ba['name']} ({ba['club']})\n"
-        text += f"   Ассисты: {ba['stats'].get('assists', 0)} | Рейтинг: {ba['rating']}\n"
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📜 Прошлые сезоны", callback_data="awards_history")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
-    ])
-
-    if callback.message.photo:
-        await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
-    else:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-
-
-@dp.callback_query(F.data == "awards_history")
-@with_user_lock
-async def awards_history_handler(callback: CallbackQuery):
-    user_id = await get_uid(callback)
-    all_awards = await load_data(AWARDS_FILE)
-    player_awards = all_awards.get(user_id, {})
-
-    if not player_awards:
-        await callback.answer("Пока нет данных", show_alert=True)
-        return
-
-    text = "📜 **ИСТОРИЯ НОМИНАЦИЙ**\n━━━━━━━━━━━━━━━━━━━━\n\n"
-    for season_key in sorted(player_awards.keys(), key=lambda x: int(x.split("_")[1])):
-        season_num = season_key.split("_")[1]
-        awards = player_awards[season_key]
-        text += f"**Сезон {season_num}:**\n"
-        if awards.get("golden_ball"):
-            gb = awards["golden_ball"]
-            mark = "⭐ " if gb.get("is_player") else ""
-            text += f"🥇 ЗМ: {mark}{gb['name']}\n"
-        if awards.get("golden_glove"):
-            gg = awards["golden_glove"]
-            mark = "⭐ " if gg.get("is_player") else ""
-            text += f"🧤 ЗП: {mark}{gg['name']}\n"
-        if awards.get("best_defender"):
-            bd = awards["best_defender"]
-            mark = "⭐ " if bd.get("is_player") else ""
-            text += f"🛡️ ЛЗ: {mark}{bd['name']}\n"
-        if awards.get("best_assistant"):
-            ba = awards["best_assistant"]
-            mark = "⭐ " if ba.get("is_player") else ""
-            text += f"🅰️ ЛА: {mark}{ba['name']}\n"
-        if awards.get("best_club"):
-            text += f"🏟 Клуб: {awards['best_club']['club']}\n"
-        text += "\n"
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_awards")]
-    ])
-    await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
 
 
 @dp.callback_query(F.data == "menu_sponsors")
@@ -5243,7 +5541,6 @@ async def season_results_handler(callback: CallbackQuery):
         await add_to_retired_leaderboard(p["name"], p["rating"], len(p.get("trophies", [])))
 
     if retired_now:
-        # Считаем номинации для завершённого сезона
         awards = await calculate_player_awards(user_id, season_num)
         bonuses = await apply_awards_bonuses(user_id, awards, season_num)
         players = await load_data(PLAYERS_FILE)
@@ -5322,7 +5619,6 @@ async def season_results_handler(callback: CallbackQuery):
         callback_data="season_choice:renew"
     )])
 
-    # Считаем номинации для завершённого сезона
     awards = await calculate_player_awards(user_id, season_num)
     bonuses = await apply_awards_bonuses(user_id, awards, season_num)
 
@@ -5484,7 +5780,6 @@ async def season_choice_handler(callback: CallbackQuery):
 # ============================================================
 
 async def ensure_files_exist():
-    """Автоматически создаёт все нужные JSON-файлы, если их нет."""
     files_defaults = {
         PLAYERS_FILE: {},
         LEADERBOARD_FILE: {"top_careers": []},
@@ -5508,6 +5803,9 @@ async def main():
     print("📌 В плей-офф есть доп. время и пенальти")
     print("📌 Номинации сезона: Лучший клуб, ЗМ, ЗП, ЛЗ, ЛА")
     print("📌 NPC-игроки для всех клубов (7 на клуб)")
+    print("📌 NPC-статы ограничены реалистичными рамками")
+    print("📌 Лучший клуб: очки + дивизион + трофеи + еврокубки")
+    print("📌 Статистика лиги: бомбардиры, ассистенты, вратари, защитники")
 
     await ensure_files_exist()
 
