@@ -1454,6 +1454,11 @@ async def simulate_euro_playoff_match_pair(club1, club2):
 
 
 async def generate_euro_playoffs(euro_data, tournament):
+    """
+    Строит сетку:
+    1. Стыковые матчи (места 9-24)
+    2. 1/8 финала из топ-8 + победителей стыков
+    """
     table = euro_data[tournament]["table"]
     sorted_table = sorted(
         table.items(),
@@ -1464,29 +1469,54 @@ async def generate_euro_playoffs(euro_data, tournament):
     top8 = [club for club, _ in sorted_table[:8]]
     playoff_teams = [club for club, _ in sorted_table[8:24]]
 
+    # Формируем пары стыковых матчей (9-24)
     random.shuffle(playoff_teams)
     playoff_pairs = []
     for i in range(0, len(playoff_teams), 2):
         if i + 1 < len(playoff_teams):
             playoff_pairs.append((playoff_teams[i], playoff_teams[i + 1]))
 
-    players = await load_data(PLAYERS_FILE)
-    player_club_in_playoff = None
-    for uid, pdata in players.items():
-        if pdata.get("retired"):
-            continue
-        club = pdata.get("club")
-        if club in playoff_teams and pdata.get("euro_tournament") == tournament:
-            player_club_in_playoff = club
-            break
+    # Сохраняем стыковые матчи в отдельное поле
+    euro_data["playoffs"][tournament]["playoff_round"] = playoff_pairs
+    euro_data["playoffs"][tournament]["playoff_winners"] = []
+    euro_data["playoffs"][tournament]["round_16"] = []
+    euro_data["playoffs"][tournament]["quarter"] = []
+    euro_data["playoffs"][tournament]["semi"] = []
+    euro_data["playoffs"][tournament]["final"] = None
+    euro_data["playoffs"][tournament]["current_stage"] = "playoff_round"
+    euro_data["playoffs"][tournament]["top8"] = top8
 
-    round_16_teams = top8.copy()
-    for pair in playoff_pairs:
-        if player_club_in_playoff and player_club_in_playoff in pair:
-            winner = player_club_in_playoff
+    await save_data(EURO_FILE, euro_data)
+
+
+async def simulate_playoff_round(euro_data, tournament, player_club=None, player_won=None):
+    """
+    Симулирует стыковые матчи (9-24). Возвращает список победителей.
+    """
+    playoffs = euro_data["playoffs"][tournament]
+    pairs = playoffs.get("playoff_round", [])
+    if not pairs:
+        return []
+
+    winners = []
+    for a, b in pairs:
+        if player_club and player_club in (a, b):
+            if player_won is True:
+                winners.append(player_club)
+            elif player_won is False:
+                winners.append(b if a == player_club else a)
+            else:
+                _, _, w = await simulate_euro_playoff_match(a, b)
+                winners.append(w)
         else:
-            winner = random.choice(pair)
-        round_16_teams.append(winner)
+            _, _, w = await simulate_euro_playoff_match(a, b)
+            winners.append(w)
+
+    playoffs["playoff_winners"] = winners
+
+    # Формируем 1/8 финала из топ-8 + победителей стыков
+    top8 = playoffs.get("top8", [])
+    round_16_teams = top8 + winners
 
     random.shuffle(round_16_teams)
     round_16 = []
@@ -1494,13 +1524,11 @@ async def generate_euro_playoffs(euro_data, tournament):
         if i + 1 < len(round_16_teams):
             round_16.append((round_16_teams[i], round_16_teams[i + 1]))
 
-    euro_data["playoffs"][tournament]["round_16"] = round_16
-    euro_data["playoffs"][tournament]["quarter"] = []
-    euro_data["playoffs"][tournament]["semi"] = []
-    euro_data["playoffs"][tournament]["final"] = None
-    euro_data["playoffs"][tournament]["current_stage"] = "round_16"
+    playoffs["round_16"] = round_16
+    playoffs["current_stage"] = "round_16"
 
     await save_data(EURO_FILE, euro_data)
+    return winners
 
 
 async def advance_playoff_round(euro_data, tournament, from_stage, player_club=None, player_won=None):
@@ -1979,20 +2007,23 @@ async def euro_simulate_match_handler(callback: CallbackQuery):
     fixtures = euro_data[tournament]["fixtures"].get(p["club"], [])
     all_played = all(f.get("played", False) for f in fixtures)
     extra = ""
-    if all_played and len(fixtures) >= EURO_TOTAL_TOURS:
+        if all_played:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
         await save_data(EURO_FILE, euro_data)
         position = await get_euro_position(user_id)
+
         if position and position <= 8:
             p["euro_playoff_stage"] = "round_16"
-            extra = "\n\n🎉 Ты прошёл в 1/8 финала!"
+            p["playoff_round_played"] = True  # топ-8 не играют стыки
+            playoff_text = "\n\n🎉 **Ты прошел напрямую в 1/8 финала!**"
         elif position and position <= 24:
-            p["euro_playoff_stage"] = "playoff"
-            extra = "\n\n⚔️ Ты попал в стыковые матчи!"
+            p["euro_playoff_stage"] = "playoff_round"
+            playoff_text = "\n\n⚔️ **Ты попал в стыковые матчи!**"
         else:
             p["euro_tournament"] = "none"
-            extra = "\n\n😔 Ты вылетел из еврокубков."
+            p["euro_playoff_stage"] = "eliminated"
+            playoff_text = "\n\n😔 **Ты вылетел из еврокубков.**"
         players[user_id] = p
         await save_data(PLAYERS_FILE, players)
 
@@ -2358,16 +2389,10 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     playoffs = euro_data["playoffs"][tournament]
     euro_info = EURO_TOURNAMENTS.get(tournament, {})
 
-    current_stage = p.get("euro_playoff_stage", "round_16")
+    current_stage = playoffs.get("current_stage", "playoff_round")
 
-    if current_stage == "playoff":
-        current_stage = "round_16"
-        p["euro_playoff_stage"] = "round_16"
-        players_tmp = await load_data(PLAYERS_FILE)
-        players_tmp[user_id] = p
-        await save_data(PLAYERS_FILE, players_tmp)
-
-    if current_stage == "eliminated" or p.get("euro_tournament") == "none":
+    # Если игрок вылетел
+    if p.get("euro_tournament") == "none" or p.get("euro_playoff_stage") == "eliminated":
         await callback.message.edit_text(
             f"🏆 **ПЛЕЙ-ОФФ {euro_info.get('name', '')}**\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -2380,50 +2405,83 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
         )
         return
 
-    if not playoffs.get(current_stage):
-        stage_order = ["round_16", "quarter", "semi", "final"]
-        idx = stage_order.index(current_stage) if current_stage in stage_order else -1
-        if idx > 0:
-            prev_stage = stage_order[idx - 1]
-            await advance_playoff_round(euro_data, tournament, prev_stage)
-            euro_data = await load_data(EURO_FILE)
-            playoffs = euro_data["playoffs"][tournament]
+    # Определяем, участвует ли игрок в текущей стадии
+    player_in_stage = False
+    opponent = None
+
+    # Стадия стыков
+    if current_stage == "playoff_round":
+        for pair in playoffs.get("playoff_round", []):
+            if p["club"] in pair:
+                player_in_stage = True
+                opponent = pair[0] if pair[1] == p["club"] else pair[1]
+                break
+    else:
+        for pair in playoffs.get(current_stage, []):
+            if p["club"] in pair:
+                player_in_stage = True
+                opponent = pair[0] if pair[1] == p["club"] else pair[1]
+                break
 
     text = f"🏆 **ПЛЕЙ-ОФФ {euro_info.get('name', '')}**\n"
     text += "━━━━━━━━━━━━━━━━━━━━\n"
-    text += f"📅 Текущая стадия: {get_euro_stage_name(current_stage)}\n\n"
 
-    pairs_to_show = playoffs.get(current_stage) or []
+    stage_names = {
+        "playoff_round": "Стыковые матчи",
+        "round_16": "1/8 финала",
+        "quarter": "1/4 финала",
+        "semi": "Полуфинал",
+        "final": "Финал"
+    }
+    text += f"📅 Текущая стадия: **{stage_names.get(current_stage, current_stage)}**\n\n"
+
+    if player_in_stage and opponent:
+        text += f"⚔️ Твой соперник: **{opponent}**\n\n"
+
+    # Показываем пары текущей стадии
+    pairs_to_show = playoffs.get(current_stage, [])
     if pairs_to_show:
-        text += f"**{get_euro_stage_name(current_stage)}:**\n"
-        for pair in pairs_to_show:
+        text += f"**{stage_names.get(current_stage, current_stage)}:**\n"
+        for pair in pairs_to_show[:8]:
             is_my = "👉 " if p["club"] in pair else "• "
             text += f"{is_my}{pair[0]} vs {pair[1]}\n"
+        if len(pairs_to_show) > 8:
+            text += f"... и ещё {len(pairs_to_show) - 8} пар\n"
 
     buttons = []
 
-    stage_played_key = f"{current_stage}_played"
-    if not p.get(stage_played_key, False):
-        if p.get("trust", 15) >= 21:
-            cb_map = {
-                "round_16": ("▶️ Сыграть 1/8 финала", "euro_play_round16"),
-                "quarter":  ("▶️ Сыграть 1/4 финала", "euro_play_quarter"),
-                "semi":     ("▶️ Сыграть полуфинал", "euro_play_semi"),
-                "final":    ("🏆 Сыграть финал!", "euro_play_final"),
-            }
-            label, cb = cb_map.get(current_stage, ("▶️ Сыграть", "noop"))
-            buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])
+    if player_in_stage:
+        stage_played_key = f"{current_stage}_played"
+        if not p.get(stage_played_key, False):
+            if p.get("trust", 15) >= 21:
+                cb_map = {
+                    "playoff_round": ("▶️ Сыграть стыковой матч", "euro_play_playoff_round"),
+                    "round_16": ("▶️ Сыграть 1/8 финала", "euro_play_round16"),
+                    "quarter": ("▶️ Сыграть 1/4 финала", "euro_play_quarter"),
+                    "semi": ("▶️ Сыграть полуфинал", "euro_play_semi"),
+                    "final": ("🏆 Сыграть финал!", "euro_play_final"),
+                }
+                label, cb = cb_map.get(current_stage, ("▶️ Сыграть", "noop"))
+                buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])
+            else:
+                cb_map = {
+                    "playoff_round": ("▶️ Смотреть стык (ты в резерве)", "euro_sim_playoff_round"),
+                    "round_16": ("▶️ Смотреть 1/8 (ты в резерве)", "euro_simulate_round16"),
+                    "quarter": ("▶️ Смотреть 1/4 (ты в резерве)", "euro_simulate_quarter"),
+                    "semi": ("▶️ Смотреть полуфинал (ты в резерве)", "euro_simulate_semi"),
+                    "final": ("🏆 Смотреть финал (ты в резерве)", "euro_simulate_final"),
+                }
+                label, cb = cb_map.get(current_stage, ("▶️ Смотреть", "noop"))
+                buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])
         else:
-            cb_map = {
-                "round_16": ("▶️ Смотреть 1/8 (ты в резерве)", "euro_simulate_round16"),
-                "quarter":  ("▶️ Смотреть 1/4 (ты в резерве)", "euro_simulate_quarter"),
-                "semi":     ("▶️ Смотреть полуфинал (ты в резерве)", "euro_simulate_semi"),
-                "final":    ("🏆 Смотреть финал (ты в резерве)", "euro_simulate_final"),
-            }
-            label, cb = cb_map.get(current_stage, ("▶️ Смотреть", "noop"))
-            buttons.append([InlineKeyboardButton(text=label, callback_data=cb)])
+            buttons.append([InlineKeyboardButton(text="✅ Матч сыгран", callback_data="noop")])
     else:
-        buttons.append([InlineKeyboardButton(text="✅ Матч сыгран", callback_data="noop")])
+        # Игрок не в текущей стадии — показываем, что вылетел
+        text += "\n😔 Ты вылетел из турнира."
+        buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")])
+        await callback.message.edit_text(text, parse_mode="Markdown",
+                                         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        return
 
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -2526,11 +2584,14 @@ async def euro_simulate_playoff_match(callback: CallbackQuery, stage: str):
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
-    if stage in ["round_16", "quarter", "semi"]:
+        if stage in ["round_16", "quarter", "semi"]:
         await advance_playoff_round(
             euro_data, tournament, stage,
-            player_club=p["club"], player_won=(winner == p["club"])
+            player_club=p["club"], player_won=won
         )
+    elif stage == "playoff_round":
+        # Стыки уже обработаны выше
+        pass
     await save_data(EURO_FILE, euro_data)
 
     await callback.message.edit_text(
@@ -2550,6 +2611,92 @@ async def euro_simulate_playoff_match(callback: CallbackQuery, stage: str):
 @with_user_lock
 async def euro_play_round16_handler(callback: CallbackQuery, state: FSMContext):
     await euro_playoff_match_handler(callback, state, "round_16", "1/8 финала")
+
+
+@dp.callback_query(F.data == "euro_sim_playoff_round")
+@with_user_lock
+async def euro_sim_playoff_round_handler(callback: CallbackQuery):
+    await euro_simulate_playoff_round(callback)
+
+
+async def euro_simulate_playoff_round(callback: CallbackQuery):
+    """Симуляция стыкового матча (игрок в резерве)."""
+    user_id = await get_uid(callback)
+    await track_activity(user_id)
+
+    p = (await load_data(PLAYERS_FILE)).get(user_id)
+    if await deny_if_retired_cb(callback, p):
+        return
+
+    euro_data = await load_data(EURO_FILE)
+    if not euro_data or euro_data.get("status") != "playoff":
+        await callback.answer("Плей-офф еще не начался")
+        return
+
+    tournament = p.get("euro_tournament")
+    if not tournament or tournament not in euro_data:
+        await callback.answer("Ты не участвуешь в еврокубках")
+        return
+
+    playoffs = euro_data["playoffs"][tournament]
+    pairs = playoffs.get("playoff_round", [])
+
+    opponent = None
+    for pair in pairs:
+        if p["club"] in pair:
+            opponent = pair[0] if pair[1] == p["club"] else pair[1]
+            break
+
+    if not opponent:
+        await callback.answer("Ты не участвуешь в стыковых матчах")
+        return
+
+    goals1, goals2, winner = await simulate_euro_playoff_match(p["club"], opponent)
+    won = winner == p["club"]
+
+    p["playoff_round_played"] = True
+
+    if won:
+        result_text = "🏆 **ПОБЕДА! ТЫ ПРОШЕЛ В 1/8 ФИНАЛА!**"
+        prize = EURO_TOURNAMENTS[tournament]["prize_win"] * 2
+        p["euro_playoff_stage"] = "round_16"
+    else:
+        result_text = "❌ **ПОРАЖЕНИЕ. ТЫ ВЫЛЕТАЕШЬ.**"
+        prize = 0
+        p["euro_tournament"] = "none"
+        p["euro_playoff_stage"] = "eliminated"
+
+    p["rating"] = max(1.0, min(100.0, round(p["rating"] + (0.1 if won else -0.1), 1)))
+    p["money"] = p.get("money", 0) + prize
+    p["euro_matches"] = p.get("euro_matches", 0) + 1
+
+    players = await load_data(PLAYERS_FILE)
+    players[user_id] = p
+    await save_data(PLAYERS_FILE, players)
+
+    # Продвигаем сетку: симулируем все стыки и формируем 1/8
+    await simulate_playoff_round(
+        euro_data, tournament,
+        player_club=p["club"], player_won=won
+    )
+
+    await callback.message.edit_text(
+        f"🏁 **СТЫКОВОЙ МАТЧ СИМУЛИРОВАН!**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚔️ **{p['club']} {goals1} : {goals2} {opponent}**\n"
+        f"{result_text}\n\n"
+        "🪑 Ты был в резерве и не участвовал в матче.\n"
+        f"💰 Призовые: +{prize}$\n"
+        f"📈 Рейтинг: {p['rating']}",
+        parse_mode="Markdown",
+        reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
+    )
+
+
+@dp.callback_query(F.data == "euro_play_playoff_round")
+@with_user_lock
+async def euro_play_playoff_round_handler(callback: CallbackQuery, state: FSMContext):
+    await euro_playoff_match_handler(callback, state, "playoff_round", "Стыковой матч")
 
 
 @dp.callback_query(F.data == "euro_play_quarter")
@@ -2593,7 +2740,12 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
         return
 
     playoffs = euro_data["playoffs"][tournament]
-    pairs = playoffs.get(stage, [])
+
+    # Определяем пары в зависимости от стадии
+    if stage == "playoff_round":
+        pairs = playoffs.get("playoff_round", [])
+    else:
+        pairs = playoffs.get(stage, [])
 
     opponent = None
     for pair in pairs:
@@ -2648,7 +2800,6 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     else:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-
 
 async def euro_playoff_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
@@ -3043,20 +3194,23 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
     all_played = all(f.get("played", False) for f in fixtures) and len(fixtures) >= EURO_TOTAL_TOURS
 
     playoff_text = ""
-    if all_played:
+        if all_played:
         euro_data["status"] = "playoff"
         await generate_euro_playoffs(euro_data, tournament)
         await save_data(EURO_FILE, euro_data)
-
         position = await get_euro_position(user_id)
+
         if position and position <= 8:
+            p["euro_playoff_stage"] = "round_16"
+            p["playoff_round_played"] = True  # топ-8 не играют стыки
             playoff_text = "\n\n🎉 **Ты прошел напрямую в 1/8 финала!**"
-            p["euro_playoff_stage"] = "round_16"
         elif position and position <= 24:
-            playoff_text = "\n\n⚔️ **Ты прошел стыковые матчи и попал в 1/8 финала!**"
-            p["euro_playoff_stage"] = "round_16"
+            p["euro_playoff_stage"] = "playoff_round"
+            playoff_text = "\n\n⚔️ **Ты попал в стыковые матчи!**"
         else:
-            playoff_text = "\n\n😔 **К сожалению, ты вылетел из еврокубков.**"
+            p["euro_tournament"] = "none"
+            p["euro_playoff_stage"] = "eliminated"
+            playoff_text = "\n\n😔 **Ты вылетел из еврокубков.**"
             p["euro_tournament"] = "none"
 
     players[user_id] = p
@@ -3195,25 +3349,36 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
                 match["opponent_score"] += 1
             await state.update_data(euro_match=match)
 
-    won = match["my_score"] > match["opponent_score"]
+        won = match["my_score"] > match["opponent_score"]
 
     if won:
         result_text = "🏆 **ПОБЕДА! ТЫ ПРОШЕЛ ДАЛЬШЕ!**"
         prize = EURO_TOURNAMENTS[tournament]["prize_win"] * 2
 
-        stage_order = ["round_16", "quarter", "semi", "final"]
-        current_idx = stage_order.index(stage) if stage in stage_order else -1
-
-        if current_idx < len(stage_order) - 1:
-            p["euro_playoff_stage"] = stage_order[current_idx + 1]
+        if stage == "playoff_round":
+            # Из стыков — в 1/8 финала
+            p["euro_playoff_stage"] = "round_16"
+            p["playoff_round_played"] = True
+            # Продвигаем сетку
+            await simulate_playoff_round(
+                euro_data, tournament,
+                player_club=p["club"], player_won=True
+            )
         else:
-            p["trophies"] = p.get("trophies", []) + [
-                f"🏆 {EURO_TOURNAMENTS[tournament]['name']} (Сезон {p.get('season', 1)})"
-            ]
-            p["money"] = p.get("money", 0) + EURO_TOURNAMENTS[tournament]["prize_winner"]
-            p["rating"] = min(100.0, p["rating"] + EURO_TOURNAMENTS[tournament]["rating_bonus_winner"])
-            p["euro_tournament"] = "none"
-            p["euro_playoff_stage"] = None
+            stage_order = ["round_16", "quarter", "semi", "final"]
+            current_idx = stage_order.index(stage) if stage in stage_order else -1
+
+            if current_idx < len(stage_order) - 1:
+                p["euro_playoff_stage"] = stage_order[current_idx + 1]
+            else:
+                # Финал выигран
+                p["trophies"] = p.get("trophies", []) + [
+                    f"🏆 {EURO_TOURNAMENTS[tournament]['name']} (Сезон {p.get('season', 1)})"
+                ]
+                p["money"] = p.get("money", 0) + EURO_TOURNAMENTS[tournament]["prize_winner"]
+                p["rating"] = min(100.0, p["rating"] + EURO_TOURNAMENTS[tournament]["rating_bonus_winner"])
+                p["euro_tournament"] = "none"
+                p["euro_playoff_stage"] = None
     else:
         result_text = "❌ **ПОРАЖЕНИЕ. ТЫ ВЫЛЕТАЕШЬ ИЗ ТУРНИРА.**"
         prize = 0
