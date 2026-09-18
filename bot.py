@@ -665,7 +665,6 @@ def generate_npc_stats(player, club_rating, season_length=30):
 
     games = random.randint(int(season_length * 0.7), season_length)
 
-    # Коэффициент силы игрока (0.4 – 1.3)
     skill = rating / 70.0
     skill = max(0.4, min(1.3, skill))
 
@@ -733,10 +732,6 @@ async def generate_all_npc_players(season_num):
 
 
 async def get_league_players(division, exclude_user_id=None):
-    """
-    Возвращает список всех игроков лиги:
-    реальные (активные) + NPC.
-    """
     players = await load_data(PLAYERS_FILE)
     npc_data = await generate_all_npc_players(1)
 
@@ -842,7 +837,6 @@ async def calculate_player_awards(user_id, season_num):
     ]
     best_assistant = max(la, key=lambda x: x["score"]) if la else None
 
-    # --- ЛУЧШИЙ КЛУБ (учитываем очки, дивизион, трофеи, еврокубки) ---
     tables = await load_data(TABLES_FILE)
     euro_data = await load_data(EURO_FILE)
 
@@ -875,9 +869,7 @@ async def calculate_player_awards(user_id, season_num):
             return 80
         if "🥇 золотой мяч" in t or "🧤 золотая перчатка" in t:
             return 0
-        return 30
-
-    club_scores = {}
+        return 30    club_scores = {}
 
     for uid, pdata in players.items():
         if pdata.get("retired"):
@@ -1183,94 +1175,80 @@ async def determine_euro_participants(season):
 
 
 def generate_swiss_fixtures(clubs):
+    """
+    НОВАЯ ВЕРСИЯ: гарантирует, что каждый клуб сыграет ровно EURO_TOTAL_TOURS матчей.
+    Использует модифицированный round-robin (круговая система).
+    """
     if len(clubs) < 8:
         return {}
 
-    fixtures = {club: [] for club in clubs}
+    clubs = list(clubs)
+    random.shuffle(clubs)
 
-    club_ratings = {club: CLUB_RATINGS.get(club, 50) for club in clubs}
-    sorted_clubs = sorted(clubs, key=lambda x: club_ratings[x], reverse=True)
+    # Гарантируем чётное количество клубов
+    if len(clubs) % 2 == 1:
+        clubs.append("__BYE__")
 
-    num_pots = 4
-    pot_size = max(1, len(sorted_clubs) // num_pots)
-    pots = {}
-    for i in range(num_pots):
-        start = i * pot_size
-        end = min((i + 1) * pot_size, len(sorted_clubs))
-        pots[i + 1] = sorted_clubs[start:end]
+    n = len(clubs)
+    fixtures = {club: [] for club in clubs if club != "__BYE__"}
 
-    club_opponents = {}
-    for club in clubs:
-        opponents = []
-        country = get_club_country(club)
-        for pot_num in [1, 2, 3, 4]:
-            available = [c for c in pots.get(pot_num, [])
-                         if c != club and c not in opponents and get_club_country(c) != country]
-            if len(available) < 2:
-                available = [c for c in pots.get(pot_num, [])
-                             if c != club and c not in opponents]
-            random.shuffle(available)
-            opponents.extend(available[:2])
-        while len(opponents) < EURO_TOTAL_TOURS:
-            pool = [c for c in clubs if c != club and c not in opponents]
-            if not pool:
-                break
-            opponents.append(random.choice(pool))
-        club_opponents[club] = opponents[:EURO_TOTAL_TOURS]
+    # Круговая система: фиксируем первый клуб, остальные вращаем
+    fixed = clubs[0]
+    rotating = clubs[1:]
 
-    pair_set = set()
-    for club in clubs:
-        for opp in club_opponents[club]:
-            pair_set.add(tuple(sorted([club, opp])))
+    tour_num = 0
 
-    pair_home = {}
-    for a, b in pair_set:
-        pair_home[(a, b)] = random.choice([True, False])
+    for r in range(n - 1):
+        if tour_num >= EURO_TOTAL_TOURS:
+            break
 
-    tour_used = {club: [False] * (EURO_TOTAL_TOURS + 1) for club in clubs}
-    pair_tour = {}
+        # Формируем пары для текущего тура
+        round_pairs = [(fixed, rotating[0])]
+        for i in range(1, n // 2):
+            round_pairs.append((rotating[i], rotating[n - 1 - i]))
 
-    pairs_list = list(pair_set)
-    random.shuffle(pairs_list)
-    pairs_list.sort(key=lambda pair: sum(tour_used[pair[0]][1:]) + sum(tour_used[pair[1]][1:]))
+        # Убираем пары с __BYE__
+        valid_pairs = [(a, b) for a, b in round_pairs if a != "__BYE__" and b != "__BYE__"]
 
-    for a, b in pairs_list:
-        placed = False
-        candidate_tours = list(range(1, EURO_TOTAL_TOURS + 1))
-        random.shuffle(candidate_tours)
-        for t in candidate_tours:
-            if not tour_used[a][t] and not tour_used[b][t]:
-                tour_used[a][t] = True
-                tour_used[b][t] = True
-                pair_tour[(a, b)] = t
-                placed = True
-                break
-        if not placed:
+        if not valid_pairs:
+            rotating = [rotating[-1]] + rotating[:-1]
             continue
 
-    for (a, b), t in pair_tour.items():
-        a_home = pair_home[(a, b)]
-        fixtures[a].append({
-            "opponent": b,
-            "home": a_home,
-            "tour": t,
-            "played": False,
-            "goals_for": 0,
-            "goals_against": 0,
-            "result": None
-        })
-        fixtures[b].append({
-            "opponent": a,
-            "home": not a_home,
-            "tour": t,
-            "played": False,
-            "goals_for": 0,
-            "goals_against": 0,
-            "result": None
-        })
+        tour_num += 1
 
+        for a, b in valid_pairs:
+            home_a = random.choice([True, False])
+
+            fixtures[a].append({
+                "opponent": b,
+                "home": home_a,
+                "tour": tour_num,
+                "played": False,
+                "goals_for": 0,
+                "goals_against": 0,
+                "result": None
+            })
+            fixtures[b].append({
+                "opponent": a,
+                "home": not home_a,
+                "tour": tour_num,
+                "played": False,
+                "goals_for": 0,
+                "goals_against": 0,
+                "result": None
+            })
+
+        # Вращаем
+        rotating = [rotating[-1]] + rotating[:-1]
+
+    # Сортируем по турам
     for club in fixtures:
         fixtures[club].sort(key=lambda m: m["tour"])
+
+    # Проверка: у каждого клуба должно быть ровно EURO_TOTAL_TOURS матчей
+    for club, matches in fixtures.items():
+        if len(matches) < EURO_TOTAL_TOURS:
+            logging.warning(f"Клуб {club} имеет только {len(matches)} матчей (нужно {EURO_TOTAL_TOURS})")
 
     return fixtures
 
@@ -1571,10 +1549,15 @@ async def advance_playoff_round(euro_data, tournament, from_stage, player_club=N
 
 async def main_menu_keyboard(username: str = None, user_id: str = None):
     match_btn_text = "🎮 Матч"
+    euro_button = None
+
     if user_id:
         p = (await load_data(PLAYERS_FILE)).get(user_id)
-        if p and p.get("tour", 1) > 30:
-            match_btn_text = "🏁 Итоги сезона"
+        if p:
+            if p.get("tour", 1) > 30:
+                match_btn_text = "🏁 Итоги сезона"
+            if p.get("euro_tournament") and p.get("euro_tournament") != "none":
+                euro_button = [InlineKeyboardButton(text="🌍 Еврокубки", callback_data="menu_euro")]
 
     kb = [
         [InlineKeyboardButton(text="🏋️‍♂️ Тренировка", callback_data="menu_train_choice"),
@@ -1590,10 +1573,8 @@ async def main_menu_keyboard(username: str = None, user_id: str = None):
         [InlineKeyboardButton(text="🟢 Онлайн / Топ", callback_data="menu_online")]
     ]
 
-    if user_id:
-        p = (await load_data(PLAYERS_FILE)).get(user_id)
-        if p and p.get("euro_tournament") and p.get("euro_tournament") != "none":
-            kb.insert(3, [InlineKeyboardButton(text="🌍 Еврокубки", callback_data="menu_euro")])
+    if euro_button:
+        kb.insert(3, euro_button)
 
     if username and username.replace("@", "") in ADMINS:
         kb.append([InlineKeyboardButton(text="👑 Админ-панель", callback_data="admin_panel")])
@@ -5797,7 +5778,7 @@ async def ensure_files_exist():
 
 async def main():
     print("🚀 Бот запущен и ожидает сообщений...")
-    print("📌 Еврокубки: 36 клубов, 8 туров, очки ≤ 24")
+    print("📌 Еврокубки: 36 клубов, 8 туров (round-robin)")
     print("📌 Плей-офф: 1/8, 1/4, 1/2, Финал")
     print("📌 Игрок играет матчи еврокубков при trust ≥ 21")
     print("📌 В плей-офф есть доп. время и пенальти")
