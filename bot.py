@@ -526,10 +526,7 @@ def update_standings(standings, home, away, hg, ag):
 
 
 async def simulate_other_groups(tournament_type, exclude_nation=None):
-    """
-    Симулирует ВСЕ матчи во ВСЕХ группах, кроме тех где участвует exclude_nation.
-    Также симулирует матчи в группе exclude_nation, где он НЕ участвует.
-    """
+    """Симулирует ВСЕ матчи во ВСЕХ группах, кроме тех где участвует exclude_nation."""
     data = await load_data(NATIONAL_FILE)
     tdata = data.get(tournament_type)
     if not tdata:
@@ -616,7 +613,6 @@ async def simulate_national_playoffs_stage(tournament_type, player_nation=None):
             # Пропускаем матч игрока - он должен сыграть сам
             if player_nation and (m["home"] == player_nation or m["away"] == player_nation):
                 if m["home_goals"] == 0 and m["away_goals"] == 0:
-                    # Матч не сыгран - пропускаем
                     winners.append(None)
                     continue
             hg, ag = await simulate_national_group_match(m["home"], m["away"])
@@ -631,9 +627,7 @@ async def simulate_national_playoffs_stage(tournament_type, player_nation=None):
         else:
             winners.append(random.choice([m["home"], m["away"]]))
     
-    # Проверяем, все ли матчи сыграны (нет None)
     if None in winners:
-        # Есть несыгранные матчи игрока - не двигаем стадию
         await save_data(NATIONAL_FILE, data)
         return tdata
     
@@ -661,7 +655,6 @@ async def simulate_full_national_tournament(tournament_type):
     if not tdata:
         return None
     
-    # 1. Симулируем все групповые матчи
     if tdata["status"] == "group":
         for gname, matches in tdata["group_matches"].items():
             standings = tdata["group_standings"][gname]
@@ -673,7 +666,6 @@ async def simulate_full_national_tournament(tournament_type):
                     m["away_goals"] = ag
                     update_standings(standings, m["home"], m["away"], hg, ag)
         
-        # Создаём плей-офф
         qualified = []
         for gname, standings in tdata["group_standings"].items():
             sorted_teams = sorted(
@@ -695,7 +687,6 @@ async def simulate_full_national_tournament(tournament_type):
         tdata["playoffs"]["round_16"] = round_16
         tdata["playoffs"]["stage"] = "round_16"
     
-    # 2. Симулируем все стадии плей-офф
     while tdata["status"] == "playoff":
         stage = tdata["playoffs"]["stage"]
         if not stage:
@@ -2691,7 +2682,8 @@ async def national_groups_handler(callback: CallbackQuery):
             mark = "⭐" if t == nation else "•"
             qualify_mark = "✅" if i <= 2 else ""
             text += f"{i}. {mark} {t} — {st.get('points', 0)} очков "
-            text += f"({st.get('wins', 0)}В/{st.get('draws', 0)}Н/{st.get('losses', 0)}П) {qualify_mark}\n"
+            text += f"({st.get('wins', 0)}В/{st.get('draws', 0)}Н/{st.get('losses', 0)}П) "
+            text += f"Игр: {st.get('played', 0)} {qualify_mark}\n"
         text += "\n"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -2814,7 +2806,6 @@ async def national_play_match_handler(callback: CallbackQuery, state: FSMContext
     if not nat_data:
         nat_data = await init_national_tournament(tour_type)
 
-    # Если игрок вылетел - показать кнопку симуляции
     if nat_data.get("status") == "finished":
         await callback.answer("Турнир уже завершён. Смотри победителя в меню.", show_alert=True)
         return
@@ -2912,6 +2903,7 @@ async def nat_match_next_handler(callback: CallbackQuery, state: FSMContext):
 
 
 async def _generate_nat_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
+    """Генерирует следующий момент матча сборной. Вызывается напрямую из всех обработчиков."""
     data = await state.get_data()
     m = data.get("nat_match")
     if not m:
@@ -3065,7 +3057,7 @@ async def nat_shoot_execute_handler(callback: CallbackQuery, state: FSMContext):
     else:
         m["log"] += f"❌ **{m['minute']}'** | Не забил.\n"
 
-    m["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут — это делает _generate_nat_moment
     await state.update_data(nat_match=m)
     await _generate_nat_moment(callback, state, user_id)
 
@@ -3097,7 +3089,7 @@ async def nat_act_pass_handler(callback: CallbackQuery, state: FSMContext):
     else:
         m["log"] += f"❌ **{m['minute']}'** | Пас перехвачен.\n"
 
-    m["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(nat_match=m)
     await _generate_nat_moment(callback, state, user_id)
 
@@ -3136,7 +3128,7 @@ async def nat_gk_handler(callback: CallbackQuery, state: FSMContext):
         m["opp_score"] += 1
         m["log"] += f"⚡ **{m['minute']}'** | Гол...\n"
 
-    m["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(nat_match=m)
     await _generate_nat_moment(callback, state, user_id)
 
@@ -3180,12 +3172,13 @@ async def nat_cb_handler(callback: CallbackQuery, state: FSMContext):
             m["opp_score"] += 1
             m["log"] += f"⚡ **{m['minute']}'** | Тебя обыграли на замахе. Гол.\n"
 
-    m["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(nat_match=m)
     await _generate_nat_moment(callback, state, user_id)
 
 
 async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: str):
+    """ИСПРАВЛЕНО: сохраняем nat_data сразу после изменения таблицы."""
     data = await state.get_data()
     m = data.get("nat_match")
     if not m:
@@ -3260,11 +3253,15 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
                 mm["away_goals"] = opp_score if mm["home"] == nation else my_score
                 break
 
+    # ✅ КРИТИЧЕСКИ ВАЖНО: СОХРАНЯЕМ nat_data_all СРАЗУ!
+    nat_data_all[m["tournament_type"]] = tdata
+    await save_data(NATIONAL_FILE, nat_data_all)
+
     # === СИМУЛИРУЕМ ВСЕ ОСТАЛЬНЫЕ МАТЧИ В ГРУППАХ ===
     if m["stage"] == "group":
         await simulate_other_groups(m["tournament_type"], exclude_nation=nation)
         
-        # Проверяем, все ли матчи сыграны во ВСЕХ группах
+        # Перезагружаем после симуляции
         nat_data_all = await load_data(NATIONAL_FILE)
         tdata = nat_data_all.get(m["tournament_type"])
         
@@ -3924,7 +3921,7 @@ async def euro_shoot_execute_handler(callback: CallbackQuery, state: FSMContext)
         else:
             match["log"] += f"❌ **{match['minute']}'** | Целился {target_dir}, но мяч пролетел мимо!\n"
 
-    match["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(euro_match=match)
 
     if match.get("is_playoff"):
@@ -3960,7 +3957,7 @@ async def euro_act_pass_handler(callback: CallbackQuery, state: FSMContext):
     else:
         match["log"] += f"❌ **{match['minute']}'** | Пас перехвачен соперником.\n"
 
-    match["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(euro_match=match)
 
     if match.get("is_playoff"):
@@ -3984,7 +3981,7 @@ async def euro_act_skip_handler(callback: CallbackQuery, state: FSMContext):
 
     user_id = await get_uid(callback)
     match["log"] += f"⏱ **{match['minute']}'** | Ты пропускаешь момент.\n"
-    match["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(euro_match=match)
 
     if match.get("is_playoff"):
@@ -4027,7 +4024,7 @@ async def euro_gk_action_handler(callback: CallbackQuery, state: FSMContext):
         match["opponent_score"] += 1
         match["log"] += f"⚡ **{match['minute']}'** | Гол... Оппонент переиграл тебя.\n"
 
-    match["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(euro_match=match)
 
     if match.get("is_playoff"):
@@ -4075,7 +4072,7 @@ async def euro_cb_action_handler(callback: CallbackQuery, state: FSMContext):
             match["opponent_score"] += 1
             match["log"] += f"⚡ **{match['minute']}'** | Тебя обыграли на замахе. Гол.\n"
 
-    match["moment"] += 1
+    # ❌ НЕ инкрементируем moment тут
     await state.update_data(euro_match=match)
 
     if match.get("is_playoff"):
@@ -7451,8 +7448,8 @@ async def main():
     print("📌 Очки в группе: победа=3, ничья=1, поражение=0")
     print("📌 Авто-симуляция других групп")
     print("📌 Авто-создание плей-офф после 3 туров")
-    print("📌 Номинации сезона: Лучший клуб, ЗМ, ЗП, ЛЗ, ЛА")
-    print("📌 NPC-игроки для всех клубов (7 на клуб)")
+    print("📌 Матчи засчитываются корректно (фикс бага)")
+    print("📌 1 момент = 1 момент (фикс двойного инкремента)")
 
     await ensure_files_exist()
 
