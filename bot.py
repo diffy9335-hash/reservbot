@@ -239,14 +239,14 @@ NATIONAL_TOURNAMENTS = {
         "name": "🏆 Чемпионат Мира",
         "emoji": "🏆",
         "teams": 32,
-        "years": [2026, 2030, 2034, 2038],
+        "years": [2026, 2030, 2034, 2038, 2042, 2046, 2050, 2054, 2058, 2062, 2066, 2070],
         "type": "world"
     },
     "euro": {
         "name": "🇪🇺 Чемпионат Европы",
         "emoji": "🇪🇺",
         "teams": 20,
-        "years": [2028, 2032, 2036],
+        "years": [2028, 2032, 2036, 2040, 2044, 2048, 2052, 2056, 2060, 2064, 2068],
         "type": "europe"
     }
 }
@@ -3295,6 +3295,7 @@ async def national_menu_handler(callback: CallbackQuery):
     if await deny_if_retired_cb(callback, p):
         return
 
+    # === ЕСЛИ ВЫЗОВ ЕСТЬ — ПОКАЗЫВАЕМ ЕГО ===
     call = p.get("national_call")
     if call and call.get("status") == "pending":
         text = national_call_text(p, call)
@@ -3310,6 +3311,9 @@ async def national_menu_handler(callback: CallbackQuery):
                 pass
         return
 
+    if call and call.get("status") == "accepted":
+        pass  # продолжаем вниз — показываем меню сборной
+
     if call and call.get("status") == "declined":
         try:
             await callback.message.edit_text(
@@ -3324,6 +3328,7 @@ async def national_menu_handler(callback: CallbackQuery):
             pass
         return
 
+    # === АВТО-СОЗДАНИЕ ВЫЗОВА ===
     national_status = await get_player_national_status(user_id)
     if not national_status or not national_status.get("called"):
         reason = national_status.get("reason", "Ты не вызван в сборную") if national_status else "Ошибка"
@@ -3346,20 +3351,47 @@ async def national_menu_handler(callback: CallbackQuery):
 
     national_data = await get_national_data()
 
+    # Если турнира нет — создаём для текущего сезона
     if not national_data or national_data.get("status") == "finished":
-        text = (
-            f"🏆 **СБОРНАЯ {nation}**\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ Рейтинг сборной: **{team_rating}**\n"
-            f"📊 Твой рейтинг: **{p['rating']}**\n"
-            f"🎂 Возраст: **{p.get('age', 17)}**\n\n"
-            f"🏟 Активного турнира сборных нет.\n"
-            f"Турниры проходят каждые 2 сезона."
-        )
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
-        ])
-    else:
+        season = p.get("season", 1)
+        year = 2026 + (season - 1) * 2
+
+        wc_years = NATIONAL_TOURNAMENTS["world_cup"]["years"]
+        eu_years = NATIONAL_TOURNAMENTS["euro"]["years"]
+
+        if year in wc_years:
+            await init_national_tournament("world_cup")
+            national_data = await get_national_data()
+        elif year in eu_years:
+            if nation in EUROPEAN_NATIONS:
+                await init_national_tournament("euro")
+                national_data = await get_national_data()
+            else:
+                national_data = None
+
+    # Если турнир есть и игрок не в заявке — создаём вызов
+    if national_data and national_data.get("status") != "finished":
+        if not call or call.get("status") not in ("pending", "accepted"):
+            await send_national_call(user_id, nation, national_data["type"])
+            p = (await load_data(PLAYERS_FILE)).get(user_id)
+            call = p.get("national_call")
+
+            if call and call.get("status") == "pending":
+                text = national_call_text(p, call)
+                kb = national_call_keyboard()
+
+                if callback.message.photo:
+                    await callback.message.delete()
+                    await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+                else:
+                    try:
+                        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+                    except TelegramBadRequest:
+                        pass
+                return
+
+    # === ЕСЛИ ВЫЗОВ ПРИНЯТ — МЕНЮ СБОРНОЙ ===
+    if national_data and national_data.get("status") != "finished":
         tour_type = national_data["type"]
         tour_info = NATIONAL_TOURNAMENTS.get(tour_type, {})
 
@@ -3388,6 +3420,19 @@ async def national_menu_handler(callback: CallbackQuery):
             [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
         ]
         kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    else:
+        text = (
+            f"🏆 **СБОРНАЯ {nation}**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚡ Рейтинг сборной: **{team_rating}**\n"
+            f"📊 Твой рейтинг: **{p['rating']}**\n"
+            f"🎂 Возраст: **{p.get('age', 17)}**\n\n"
+            f"🏟 В этом сезоне турнира сборных нет.\n"
+            f"Следующий турнир — через 2 сезона."
+        )
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
+        ])
 
     if callback.message.photo:
         await callback.message.delete()
