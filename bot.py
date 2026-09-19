@@ -7449,10 +7449,12 @@ async def nat_shoot_execute(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "nat_act_pass")
 @with_user_lock
 async def nat_act_pass(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+
     data = await state.get_data()
     match = data.get("national_match")
     if not match:
-        return await callback.answer("Матч не найден", show_alert=True)
+        return
 
     user_id = await get_uid(callback)
     p = (await load_data(PLAYERS_FILE)).get(user_id)
