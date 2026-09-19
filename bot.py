@@ -2861,8 +2861,13 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
         return
 
     if p.get(f"{stage}_played", False):
-        await callback.answer("Ты уже сыграл этот матч!")
-        return
+        # Проверяем, что матч реально был в этом сезоне
+        if p.get("euro_playoff_stage") != stage:
+            # Игрок в этой стадии — значит флаг устаревший
+            p.pop(f"{stage}_played", None)
+        else:
+            await callback.answer("Ты уже сыграл этот матч!")
+            return
 
     match_data = {
         "tournament": tournament,
