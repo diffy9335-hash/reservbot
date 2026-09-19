@@ -525,13 +525,144 @@ def update_standings(standings, home, away, hg, ag):
         standings[away]["draws"] += 1
 
 
-async def simulate_national_tournament_stage(tournament_type):
+async def simulate_other_groups(tournament_type, exclude_nation=None):
+    """
+    Симулирует ВСЕ матчи во ВСЕХ группах, кроме тех где участвует exclude_nation.
+    Также симулирует матчи в группе exclude_nation, где он НЕ участвует.
+    """
+    data = await load_data(NATIONAL_FILE)
+    tdata = data.get(tournament_type)
+    if not tdata:
+        return
+    
+    for gname, matches in tdata["group_matches"].items():
+        standings = tdata["group_standings"][gname]
+        for m in matches:
+            if m["played"]:
+                continue
+            # Пропускаем матчи с участием игрока - их игрок должен сыграть сам
+            if exclude_nation and (m["home"] == exclude_nation or m["away"] == exclude_nation):
+                continue
+            hg, ag = await simulate_national_group_match(m["home"], m["away"])
+            m["played"] = True
+            m["home_goals"] = hg
+            m["away_goals"] = ag
+            update_standings(standings, m["home"], m["away"], hg, ag)
+    
+    await save_data(NATIONAL_FILE, data)
+
+
+def check_all_groups_finished(tdata) -> bool:
+    """Проверяет, все ли матчи во всех группах сыграны."""
+    for gname, matches in tdata.get("group_matches", {}).items():
+        for m in matches:
+            if not m["played"]:
+                return False
+    return True
+
+
+async def create_national_playoffs(tournament_type):
+    """Создаёт сетку плей-офф из топ-2 каждой группы."""
     data = await load_data(NATIONAL_FILE)
     tdata = data.get(tournament_type)
     if not tdata:
         return None
+    
+    if tdata["status"] != "group":
+        return tdata
+    
+    qualified = []
+    for gname, standings in tdata["group_standings"].items():
+        sorted_teams = sorted(
+            standings.items(),
+            key=lambda x: (x[1]["points"], x[1]["gf"] - x[1]["ga"], x[1]["gf"]),
+            reverse=True
+        )
+        # Топ-2 из группы
+        qualified.append(sorted_teams[0][0])
+        qualified.append(sorted_teams[1][0])
+    
+    random.shuffle(qualified)
+    
+    round_16 = []
+    for i in range(0, len(qualified), 2):
+        if i + 1 < len(qualified):
+            round_16.append({"home": qualified[i], "away": qualified[i + 1], "played": False,
+                             "home_goals": 0, "away_goals": 0})
+    
+    tdata["status"] = "playoff"
+    tdata["playoffs"]["round_16"] = round_16
+    tdata["playoffs"]["stage"] = "round_16"
+    
+    await save_data(NATIONAL_FILE, data)
+    return tdata
+
+
+async def simulate_national_playoffs_stage(tournament_type, player_nation=None):
+    """Симулирует одну стадию плей-офф."""
+    data = await load_data(NATIONAL_FILE)
+    tdata = data.get(tournament_type)
+    if not tdata or tdata["status"] != "playoff":
+        return tdata
+    
+    stage = tdata["playoffs"]["stage"]
+    if not stage or not tdata["playoffs"].get(stage):
+        return tdata
+    
+    pairs = tdata["playoffs"][stage]
+    winners = []
+    for m in pairs:
+        if not m["played"]:
+            # Пропускаем матч игрока - он должен сыграть сам
+            if player_nation and (m["home"] == player_nation or m["away"] == player_nation):
+                if m["home_goals"] == 0 and m["away_goals"] == 0:
+                    # Матч не сыгран - пропускаем
+                    winners.append(None)
+                    continue
+            hg, ag = await simulate_national_group_match(m["home"], m["away"])
+            m["played"] = True
+            m["home_goals"] = hg
+            m["away_goals"] = ag
+        
+        if m["home_goals"] > m["away_goals"]:
+            winners.append(m["home"])
+        elif m["home_goals"] < m["away_goals"]:
+            winners.append(m["away"])
+        else:
+            winners.append(random.choice([m["home"], m["away"]]))
+    
+    # Проверяем, все ли матчи сыграны (нет None)
+    if None in winners:
+        # Есть несыгранные матчи игрока - не двигаем стадию
+        await save_data(NATIONAL_FILE, data)
+        return tdata
+    
+    next_stage = {"round_16": "quarter", "quarter": "semi", "semi": "final", "final": None}.get(stage)
+    if next_stage:
+        next_pairs = []
+        for i in range(0, len(winners), 2):
+            if i + 1 < len(winners):
+                next_pairs.append({"home": winners[i], "away": winners[i + 1], "played": False,
+                                   "home_goals": 0, "away_goals": 0})
+        tdata["playoffs"][next_stage] = next_pairs
+        tdata["playoffs"]["stage"] = next_stage
+    else:
+        tdata["playoffs"]["winner"] = winners[0] if winners else None
+        tdata["status"] = "finished"
+    
+    await save_data(NATIONAL_FILE, data)
+    return tdata
+
+
+async def simulate_full_national_tournament(tournament_type):
+    """Полная симуляция турнира до конца (для вылетевших игроков)."""
+    data = await load_data(NATIONAL_FILE)
+    tdata = data.get(tournament_type)
+    if not tdata:
+        return None
+    
+    # 1. Симулируем все групповые матчи
     if tdata["status"] == "group":
-        all_played = True
         for gname, matches in tdata["group_matches"].items():
             standings = tdata["group_standings"][gname]
             for m in matches:
@@ -541,58 +672,67 @@ async def simulate_national_tournament_stage(tournament_type):
                     m["home_goals"] = hg
                     m["away_goals"] = ag
                     update_standings(standings, m["home"], m["away"], hg, ag)
-        for gname, matches in tdata["group_matches"].items():
-            for m in matches:
-                if not m["played"]:
-                    all_played = False
-        if all_played:
-            tdata["status"] = "playoff"
-            qualified = []
-            for gname, standings in tdata["group_standings"].items():
-                sorted_teams = sorted(
-                    standings.items(),
-                    key=lambda x: (x[1]["points"], x[1]["gf"] - x[1]["ga"], x[1]["gf"]),
-                    reverse=True
-                )
-                qualified.append(sorted_teams[0][0])
-                qualified.append(sorted_teams[1][0])
-            random.shuffle(qualified)
-            round_16 = []
-            for i in range(0, len(qualified), 2):
-                if i + 1 < len(qualified):
-                    round_16.append({"home": qualified[i], "away": qualified[i + 1], "played": False,
-                                     "home_goals": 0, "away_goals": 0})
-            tdata["playoffs"]["round_16"] = round_16
-            tdata["playoffs"]["stage"] = "round_16"
-    if tdata["status"] == "playoff":
+        
+        # Создаём плей-офф
+        qualified = []
+        for gname, standings in tdata["group_standings"].items():
+            sorted_teams = sorted(
+                standings.items(),
+                key=lambda x: (x[1]["points"], x[1]["gf"] - x[1]["ga"], x[1]["gf"]),
+                reverse=True
+            )
+            qualified.append(sorted_teams[0][0])
+            qualified.append(sorted_teams[1][0])
+        
+        random.shuffle(qualified)
+        round_16 = []
+        for i in range(0, len(qualified), 2):
+            if i + 1 < len(qualified):
+                round_16.append({"home": qualified[i], "away": qualified[i + 1], "played": False,
+                                 "home_goals": 0, "away_goals": 0})
+        
+        tdata["status"] = "playoff"
+        tdata["playoffs"]["round_16"] = round_16
+        tdata["playoffs"]["stage"] = "round_16"
+    
+    # 2. Симулируем все стадии плей-офф
+    while tdata["status"] == "playoff":
         stage = tdata["playoffs"]["stage"]
-        if stage and tdata["playoffs"].get(stage):
-            pairs = tdata["playoffs"][stage]
-            winners = []
-            for m in pairs:
-                if not m["played"]:
-                    hg, ag = await simulate_national_group_match(m["home"], m["away"])
-                    m["played"] = True
-                    m["home_goals"] = hg
-                    m["away_goals"] = ag
-                if m["home_goals"] > m["away_goals"]:
-                    winners.append(m["home"])
-                elif m["home_goals"] < m["away_goals"]:
-                    winners.append(m["away"])
-                else:
-                    winners.append(random.choice([m["home"], m["away"]]))
-            next_stage = {"round_16": "quarter", "quarter": "semi", "semi": "final", "final": None}.get(stage)
-            if next_stage:
-                next_pairs = []
-                for i in range(0, len(winners), 2):
-                    if i + 1 < len(winners):
-                        next_pairs.append({"home": winners[i], "away": winners[i + 1], "played": False,
-                                           "home_goals": 0, "away_goals": 0})
-                tdata["playoffs"][next_stage] = next_pairs
-                tdata["playoffs"]["stage"] = next_stage
+        if not stage:
+            break
+        
+        pairs = tdata["playoffs"].get(stage, [])
+        if not pairs:
+            break
+        
+        winners = []
+        for m in pairs:
+            if not m["played"]:
+                hg, ag = await simulate_national_group_match(m["home"], m["away"])
+                m["played"] = True
+                m["home_goals"] = hg
+                m["away_goals"] = ag
+            
+            if m["home_goals"] > m["away_goals"]:
+                winners.append(m["home"])
+            elif m["home_goals"] < m["away_goals"]:
+                winners.append(m["away"])
             else:
-                tdata["playoffs"]["winner"] = winners[0] if winners else None
-                tdata["status"] = "finished"
+                winners.append(random.choice([m["home"], m["away"]]))
+        
+        next_stage = {"round_16": "quarter", "quarter": "semi", "semi": "final", "final": None}.get(stage)
+        if next_stage:
+            next_pairs = []
+            for i in range(0, len(winners), 2):
+                if i + 1 < len(winners):
+                    next_pairs.append({"home": winners[i], "away": winners[i + 1], "played": False,
+                                       "home_goals": 0, "away_goals": 0})
+            tdata["playoffs"][next_stage] = next_pairs
+            tdata["playoffs"]["stage"] = next_stage
+        else:
+            tdata["playoffs"]["winner"] = winners[0] if winners else None
+            tdata["status"] = "finished"
+    
     await save_data(NATIONAL_FILE, data)
     return tdata
 # ============================================================
@@ -2357,7 +2497,7 @@ async def national_menu_handler(callback: CallbackQuery):
     if call and call.get("status") == "pending":
         buttons.append([InlineKeyboardButton(text="📨 Открыть вызов", callback_data="national_call:view")])
     buttons.append([InlineKeyboardButton(text="▶️ Играть матч", callback_data="national_play_match")])
-    buttons.append([InlineKeyboardButton(text="🔄 Симулировать турнир", callback_data="national_simulate")])
+    buttons.append([InlineKeyboardButton(text="🔄 Симулировать до конца", callback_data="national_simulate")])
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")])
 
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -2549,8 +2689,9 @@ async def national_groups_handler(callback: CallbackQuery):
         for i, t in enumerate(sorted_teams, 1):
             st = standings.get(t, {})
             mark = "⭐" if t == nation else "•"
+            qualify_mark = "✅" if i <= 2 else ""
             text += f"{i}. {mark} {t} — {st.get('points', 0)} очков "
-            text += f"({st.get('wins', 0)}В/{st.get('draws', 0)}Н/{st.get('losses', 0)}П)\n"
+            text += f"({st.get('wins', 0)}В/{st.get('draws', 0)}Н/{st.get('losses', 0)}П) {qualify_mark}\n"
         text += "\n"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -2591,7 +2732,8 @@ async def national_playoffs_handler(callback: CallbackQuery):
             if pairs:
                 text += f"**{stage_name}:**\n"
                 for m in pairs:
-                    text += f"• {m['home']} vs {m['away']}\n"
+                    mark = "⭐ " if m['home'] == p.get("nation") or m['away'] == p.get("nation") else "• "
+                    text += f"{mark}{m['home']} vs {m['away']}\n"
                 text += "\n"
         winner = playoffs.get("winner")
         if winner:
@@ -2623,14 +2765,12 @@ async def national_simulate_handler(callback: CallbackQuery):
     if not nat_data:
         nat_data = await init_national_tournament(tour_type)
 
-    for _ in range(20):
-        nat_data = await simulate_national_tournament_stage(tour_type)
-        if not nat_data or nat_data.get("status") == "finished":
-            break
+    # Полная симуляция
+    nat_data = await simulate_full_national_tournament(tour_type)
 
     winner = nat_data.get("playoffs", {}).get("winner", "?") if nat_data else "?"
     nation = p.get("nation", "Россия")
-    text = f"🔄 **ТУРНИР СИМУЛИРОВАН!**\n━━━━━━━━━━━━━━━━━━━━\n"
+    text = f"🔄 **ТУРНИР СИМУЛИРОВАН ДО КОНЦА!**\n━━━━━━━━━━━━━━━━━━━━\n"
     text += f"🏆 Победитель: **{winner}**\n"
 
     if winner == nation:
@@ -2673,6 +2813,26 @@ async def national_play_match_handler(callback: CallbackQuery, state: FSMContext
     nat_data = await get_national_data(tour_type)
     if not nat_data:
         nat_data = await init_national_tournament(tour_type)
+
+    # Если игрок вылетел - показать кнопку симуляции
+    if nat_data.get("status") == "finished":
+        await callback.answer("Турнир уже завершён. Смотри победителя в меню.", show_alert=True)
+        return
+
+    # Проверяем, не вылетел ли игрок в плей-офф
+    if nat_data.get("status") == "playoff":
+        playoffs = nat_data.get("playoffs", {})
+        found = False
+        for stage_key in ["round_16", "quarter", "semi", "final"]:
+            for m in playoffs.get(stage_key, []):
+                if (m["home"] == nation or m["away"] == nation) and not m["played"]:
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            await callback.answer("Ты вылетел! Используй 'Симулировать до конца'.", show_alert=True)
+            return
 
     opponent = None
     stage = None
@@ -2752,7 +2912,6 @@ async def nat_match_next_handler(callback: CallbackQuery, state: FSMContext):
 
 
 async def _generate_nat_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
-    """Генерирует следующий момент матча сборной. Вызывается напрямую из всех обработчиков."""
     data = await state.get_data()
     m = data.get("nat_match")
     if not m:
@@ -3034,8 +3193,8 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
 
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
-    nat_data = await load_data(NATIONAL_FILE)
-    tdata = nat_data.get(m["tournament_type"])
+    nat_data_all = await load_data(NATIONAL_FILE)
+    tdata = nat_data_all.get(m["tournament_type"])
     if not tdata:
         await state.update_data(nat_match=None)
         return
@@ -3058,6 +3217,7 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
         result_text = "🤝 **НИЧЬЯ**"
         prize = 20_000
 
+    # === ОБНОВЛЕНИЕ ТАБЛИЦЫ ГРУППЫ ===
     if m["stage"] == "group":
         for gname, teams in tdata.get("groups", {}).items():
             if nation in teams:
@@ -3068,6 +3228,7 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
                 standings[opp]["ga"] += my_score
                 standings[nation]["played"] += 1
                 standings[opp]["played"] += 1
+                # ✅ ПРАВИЛЬНОЕ начисление очков
                 if result == "win":
                     standings[nation]["points"] += 3
                     standings[nation]["wins"] += 1
@@ -3081,6 +3242,7 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
                     standings[nation]["draws"] += 1
                     standings[opp]["points"] += 1
                     standings[opp]["draws"] += 1
+                # Отмечаем матч как сыгранный
                 for mm in tdata["group_matches"][gname]:
                     if (mm["home"] == nation and mm["away"] == opp) or (mm["home"] == opp and mm["away"] == nation):
                         mm["played"] = True
@@ -3088,17 +3250,8 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
                         mm["away_goals"] = opp_score if mm["home"] == nation else my_score
                         break
                 break
-        all_group_played = True
-        for gname, matches in tdata["group_matches"].items():
-            for mm in matches:
-                if not mm["played"]:
-                    all_group_played = False
-                    break
-            if not all_group_played:
-                break
-        if all_group_played:
-            await simulate_national_tournament_stage(m["tournament_type"])
     else:
+        # Плей-офф
         playoffs = tdata.get("playoffs", {})
         for mm in playoffs.get(m["stage"], []):
             if (mm["home"] == nation and mm["away"] == opp) or (mm["home"] == opp and mm["away"] == nation):
@@ -3106,12 +3259,56 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
                 mm["home_goals"] = my_score if mm["home"] == nation else opp_score
                 mm["away_goals"] = opp_score if mm["home"] == nation else my_score
                 break
-        await simulate_national_tournament_stage(m["tournament_type"])
+
+    # === СИМУЛИРУЕМ ВСЕ ОСТАЛЬНЫЕ МАТЧИ В ГРУППАХ ===
+    if m["stage"] == "group":
+        await simulate_other_groups(m["tournament_type"], exclude_nation=nation)
+        
+        # Проверяем, все ли матчи сыграны во ВСЕХ группах
+        nat_data_all = await load_data(NATIONAL_FILE)
+        tdata = nat_data_all.get(m["tournament_type"])
+        
+        if check_all_groups_finished(tdata):
+            # ✅ Все матчи сыграны - создаём плей-офф
+            await create_national_playoffs(m["tournament_type"])
+            nat_data_all = await load_data(NATIONAL_FILE)
+            tdata = nat_data_all.get(m["tournament_type"])
+            
+            # Проверяем, прошла ли сборная игрока в плей-офф
+            qualified = []
+            for gname, standings in tdata["group_standings"].items():
+                sorted_teams = sorted(
+                    standings.items(),
+                    key=lambda x: (x[1]["points"], x[1]["gf"] - x[1]["ga"], x[1]["gf"]),
+                    reverse=True
+                )
+                qualified.append(sorted_teams[0][0])
+                qualified.append(sorted_teams[1][0])
+            
+            if nation not in qualified:
+                result_text += "\n\n😔 **Ты не прошел в плей-офф!** Используй 'Симулировать до конца' в меню."
+            else:
+                result_text += "\n\n🎉 **Ты прошел в плей-офф!**"
+
+    # === СИМУЛИРУЕМ СТАДИЮ ПЛЕЙ-ОФФ ===
+    if m["stage"] != "group":
+        # Симулируем остальные матчи этой стадии (без игрока)
+        await simulate_national_playoffs_stage(m["tournament_type"], player_nation=nation)
 
     p["money"] = p.get("money", 0) + prize
-    p["rating"] = max(1.0, min(100.0, p.get("rating", 40) + (0.2 if result == "win" else (-0.1 if result == "loss" else 0.05))))
+    rating_bonus = 0.2 if result == "win" else (-0.1 if result == "loss" else 0.05)
+    p["rating"] = max(1.0, min(100.0, p.get("rating", 40) + rating_bonus))
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
+
+    # Обновляем nat_data для финального ответа
+    nat_data_all = await load_data(NATIONAL_FILE)
+    tdata = nat_data_all.get(m["tournament_type"])
+
+    extra = ""
+    if tdata and tdata.get("status") == "finished":
+        winner = tdata.get("playoffs", {}).get("winner", "?")
+        extra = f"\n\n🏆 **Победитель турнира: {winner}**"
 
     text = f"🏁 **МАТЧ СБОРНОЙ ЗАВЕРШЕН!**\n━━━━━━━━━━━━━━━━━━━━\n"
     text += f"⚔️ **{nation} {my_score} : {opp_score} {opp}**\n"
@@ -3119,6 +3316,7 @@ async def nat_finish_match(callback: CallbackQuery, state: FSMContext, user_id: 
     text += f"📊 Голы: {m.get('goals', 0)} | Ассисты: {m.get('assists', 0)} | Сейвы: {m.get('saves', 0)} | Отборы: {m.get('tackles', 0)}\n"
     text += f"💰 Призовые: +{prize}$\n"
     text += f"📈 Рейтинг: {p['rating']}"
+    text += extra
 
     await state.update_data(nat_match=None)
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -4731,7 +4929,7 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
 
 
 # ============================================================
-# ПРОЧИЕ МЕНЮ (онлайн, зал славы, спонсоры, квесты, личная жизнь)
+# ПРОЧИЕ МЕНЮ
 # ============================================================
 
 @dp.callback_query(F.data == "menu_online")
@@ -7250,6 +7448,9 @@ async def main():
     print("📌 Плей-офф: стыки + 1/8, 1/4, 1/2, Финал")
     print("📌 Сборные: 32 нации, ЧМ и ЧЕ")
     print("📌 Турниры сборных каждые 2 сезона")
+    print("📌 Очки в группе: победа=3, ничья=1, поражение=0")
+    print("📌 Авто-симуляция других групп")
+    print("📌 Авто-создание плей-офф после 3 туров")
     print("📌 Номинации сезона: Лучший клуб, ЗМ, ЗП, ЛЗ, ЛА")
     print("📌 NPC-игроки для всех клубов (7 на клуб)")
 
