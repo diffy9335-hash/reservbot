@@ -796,17 +796,17 @@ async def calculate_player_awards(user_id, season_num):
                 "is_player": False
             })
 
-    zm = []
+        zm = []
     for c in all_candidates:
         s = c["stats"]
         score = (
-            c["rating"] * 10 +
-            s.get("goals", 0) * 3 +
-            s.get("assists", 0) * 2 +
-            c["trophies"] * 15
+            c["rating"] * 7 +
+            s.get("goals", 0) * 5 +
+            s.get("assists", 0) * 3 +
+            c["trophies"] * 18
         )
         if c.get("is_player"):
-            score += 50
+            score += 30
         zm.append({**c, "score": round(score, 1)})
     golden_ball = max(zm, key=lambda x: x["score"]) if zm else None
 
@@ -3353,6 +3353,7 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
     if not match:
         return
 
+    won = False
     players = await load_data(PLAYERS_FILE)
     p = players.get(user_id)
     euro_data = await load_data(EURO_FILE)
@@ -3455,7 +3456,7 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
                 match["opponent_score"] += 1
             await state.update_data(euro_match=match)
 
-        won = match["my_score"] > match["opponent_score"]
+    won = match["my_score"] > match["opponent_score"]
 
     if won:
         result_text = "🏆 **ПОБЕДА! ТЫ ПРОШЕЛ ДАЛЬШЕ!**"
