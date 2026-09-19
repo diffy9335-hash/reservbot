@@ -2458,6 +2458,15 @@ async def national_menu_handler(callback: CallbackQuery):
     tour_info = NATIONAL_TOURNAMENTS.get(tour_type, {})
     nat_data = await get_national_data(tour_type)
 
+    # ✅ Словарь для читаемых названий стадий (без подчёркиваний!)
+    stage_names = {
+        "playoff_round": "Стыковые матчи",
+        "round_16": "1/8 финала",
+        "quarter": "1/4 финала",
+        "semi": "Полуфинал",
+        "final": "Финал",
+    }
+
     text = f"🏆 **{tour_info.get('name', 'Турнир сборных')} {year}**\n"
     text += "━━━━━━━━━━━━━━━━━━━━\n"
     text += f"🌍 Твоя сборная: **{nation}**\n"
@@ -2475,8 +2484,9 @@ async def national_menu_handler(callback: CallbackQuery):
         if nat_data.get("status") == "group":
             text += "\n📅 Статус: **Групповой этап**\n"
         elif nat_data.get("status") == "playoff":
-            stage = nat_data.get("playoffs", {}).get("stage", "")
-            text += f"\n📅 Статус: **Плей-офф ({stage})**\n"
+            raw_stage = nat_data.get("playoffs", {}).get("stage", "")
+            stage_label = stage_names.get(raw_stage, "Плей-офф")
+            text += f"\n📅 Статус: **Плей-офф** ({stage_label})\n"
         elif nat_data.get("status") == "finished":
             winner = nat_data.get("playoffs", {}).get("winner", "?")
             text += f"\n🏆 **Победитель: {winner}**\n"
