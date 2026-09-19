@@ -7449,15 +7449,14 @@ async def nat_shoot_execute(callback: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "nat_act_pass")
 @with_user_lock
 async def nat_act_pass(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        pass
 
-    print(f"=== nat_act_pass ВЫЗВАН ===")
-    print(f"=== STATE = {await state.get_state()} ===")
     data = await state.get_data()
     match = data.get("national_match")
-        print(f"=== DATA KEYS = {list(data.keys())} ===")
-    print(f"=== MATCH = {match} ===")
-if not match:
+    if not match:
         return
 
     user_id = await get_uid(callback)
