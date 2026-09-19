@@ -4081,15 +4081,15 @@ async def adm_skip_season(callback: CallbackQuery):
         if target_id in players:
             p = players[target_id]
 
-                await generate_euro_data(p.get("season", 1) + 1)
+            await generate_euro_data(p.get("season", 1) + 1)
 
-    p["season"] += 1
-    p["tour"] = 1
+            p["season"] += 1
+            p["tour"] = 1
 
-    # Сброс флагов плей-офф
-    for k in ["round_16_played", "playoff_round_played", "quarter_played", "semi_played", "final_played"]:
-        p.pop(k, None)
-    p["euro_playoff_stage"] = None
+            # Сброс флагов плей-офф
+            for k in ["round_16_played", "playoff_round_played", "quarter_played", "semi_played", "final_played"]:
+                p.pop(k, None)
+            p["euro_playoff_stage"] = None
             p["stats_season"] = {"games": 0, "goals": 0, "assists": 0, "saves": 0, "tackles": 0}
             p["played_league_rivals"] = []
             p["fatigue"] = max(0, p.get("fatigue", 0) - 30)
