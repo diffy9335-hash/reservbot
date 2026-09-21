@@ -5675,7 +5675,8 @@ async def act_shoot_execute_handler(callback: CallbackQuery, state: FSMContext):
         score_chance -= 0.15
         gk_guessed = True
     else:
-        score_chance += 0.10        gk_guessed = False
+        score_chance += 0.10
+        gk_guessed = False
     score_chance = max(0.05, min(0.95, score_chance))
 
     if random.random() < score_chance:
