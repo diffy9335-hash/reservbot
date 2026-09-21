@@ -8,7 +8,8 @@ import os
 import time
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -29,10 +30,62 @@ PLAYERS_FILE = "players.json"
 LEADERBOARD_FILE = "leaderboard.json"
 TABLES_FILE = "tables.json"
 SLOTS_FILE = "slots.json"
-EURO_FILE = "euro_qualification.json"  # старый общий файл (только для миграции)
-EURO_DIR = "euro_data"  # теперь у каждой карьеры свой файл еврокубков: euro_data/<user_id>.json
+EURO_FILE = "euro_qualification.json"
+EURO_DIR = "euro_data"
 AWARDS_FILE = "awards.json"
 NPC_FILE = "npc_players.json"
+MOMENT_IMAGES_FILE = "moment_images.json"
+
+
+MOMENT_KEYS = {
+    "st_one_on_one", "st_counter", "st_penalty_area", "st_header",
+    "st_free_kick", "st_wing", "st_press", "st_penalty",
+    "cm_midfield", "cm_through_ball", "cm_counter", "cm_press",
+    "cm_tackle", "cm_free_kick", "cm_corner", "cm_wing",
+    "cb_dribbler", "cb_last_defender", "cb_cross", "cb_corner_def",
+    "cb_aerial", "cb_counter", "cb_corner_attack", "cb_press",
+    "gk_one_on_one", "gk_long_shot", "gk_close_shot", "gk_cross",
+    "gk_corner", "gk_pass", "gk_penalty", "gk_rebound",
+    "goal_celebration", "save_moment", "card_moment",
+}
+
+MOMENT_KEYS_DESC = {
+    "st_one_on_one": "Форвард один на один с вратарём",
+    "st_counter": "Форвард бежит в контратаку",
+    "st_penalty_area": "Форвард в штрафной под давлением",
+    "st_header": "Форвард бьёт головой",
+    "st_free_kick": "Игрок готовится к штрафному",
+    "st_wing": "Форвард на фланге против защитника",
+    "st_press": "Форвард прессингует защитника",
+    "st_penalty": "Игрок у точки пенальти",
+    "cm_midfield": "Борьба в центре поля",
+    "cm_through_ball": "Полузащитник отдаёт пас",
+    "cm_counter": "Полузащитник ведёт контратаку",
+    "cm_press": "Полузащитник прессингует",
+    "cm_tackle": "Отбор в центре поля",
+    "cm_free_kick": "Штрафной удар",
+    "cm_corner": "Подача углового",
+    "cm_wing": "Полузащитник на фланге",
+    "cb_dribbler": "Защитник против дриблингующего форварда",
+    "cb_last_defender": "Защитник догоняет форварда",
+    "cb_cross": "Защитник выбивает навес",
+    "cb_corner_def": "Защитник на угловом у своих ворот",
+    "cb_aerial": "Верховое единоборство",
+    "cb_counter": "Защитник один против контратаки",
+    "cb_corner_attack": "Защитник на угловом у чужих ворот",
+    "cb_press": "Защитник прессингует у штрафной",
+    "gk_one_on_one": "Вратарь против выходящего форварда",
+    "gk_long_shot": "Вратарь в прыжке за дальним ударом",
+    "gk_close_shot": "Вратарь отражает удар в упор",
+    "gk_cross": "Вратарь на выходе на навес",
+    "gk_corner": "Вратарь на угловом",
+    "gk_pass": "Вратарь с мячом начинает атаку",
+    "gk_penalty": "Вратарь на линии перед пенальти",
+    "gk_rebound": "Вратарь бросается на добивание",
+    "goal_celebration": "Празднование гола",
+    "save_moment": "Красивый сейв",
+    "card_moment": "Судья показывает карточку",
+}
 
 
 def _load_data_sync(filename):
@@ -56,13 +109,6 @@ def _save_data_sync(filename, data):
 
 
 class _TrackedDict(dict):
-    """dict, который помнит своё состояние на момент загрузки.
-
-    При сохранении в файл записываются только те ключи верхнего уровня, которые
-    этот код реально изменил (остальное берётся из файла заново). Так два игрока,
-    одновременно делающих «прочитал → изменил → записал», больше не затирают
-    друг другу данные в players.json / tables.json и т.п.
-    """
     _snapshot = None
 
 
@@ -239,7 +285,6 @@ EURO_NATIONS = [
 ]
 
 NATIONS = EURO_NATIONS
-
 CLUBS = {
     "ФНЛ 2": ["Знамя Труда", "Сатурн Раменское", "Коломна", "Зенит-2", "Спартак-2", "Амкар Пермь", "Динамо Киров", "Рубин-2", "Торпедо Владимир", "Тверь", "Химик Дзержинск", "Иркутск"],
     "ФНЛ": ["Черноморец", "Шинник", "Урал", "Сочи", "Балтика", "Родина", "Торпедо М", "Арсенал Тула", "КАМАЗ", "Енисей", "Нефтехимик", "СКА-Хабаровск", "Уфа", "Тюмень", "Ротор", "Сокол", "Чайка", "Алания"],
@@ -366,7 +411,6 @@ def get_quest_progress(p, q_type):
 
 
 def _table_sort_key(row):
-    """Очки, при равенстве - количество побед."""
     return (row.get("points", 0), row.get("wins", 0))
 
 
@@ -484,13 +528,7 @@ async def init_tables_for_user(user_id, division, player_club=None):
         await save_data(TABLES_FILE, tables)
 
 
-
-
 async def simulate_table_until_tour(user_id, division, player_club, current_tour):
-    """
-    Создаёт таблицу и симулирует все туры до current_tour.
-    Используется при переходе в новый клуб посреди сезона.
-    """
     await init_tables_for_user(user_id, division, player_club)
 
     tables = await load_data(TABLES_FILE)
@@ -890,7 +928,7 @@ async def calculate_player_awards(user_id, season_num):
                 "is_player": False
             })
 
-        zm = []
+    zm = []
     for c in all_candidates:
         s = c["stats"]
         score = (
@@ -988,7 +1026,7 @@ async def calculate_player_awards(user_id, season_num):
         if pdata.get("euro_tournament") in EURO_TOURNAMENTS:
             euro_bonus += 100
             stage = pdata.get("euro_playoff_stage")
-            if stage and stage != "eliminated":  # групповой этап позади - идёт плей-офф
+            if stage and stage != "eliminated":
                 euro_bonus += 150
             if stage == "round_16":
                 euro_bonus += 100
@@ -1175,14 +1213,11 @@ EURO_CUPS = ("champions_league", "europa_league", "conference_league")
 EURO_PLAYOFF_FLAGS = ("playoff_round_played", "round_16_played", "quarter_played", "semi_played", "final_played")
 
 
-# ---- еврокубки хранятся отдельно для каждой карьеры: euro_data/<user_id>.json ----
-
 def _euro_path(user_id):
     return os.path.join(EURO_DIR, f"{user_id}.json")
 
 
 async def load_euro(user_id):
-    """Данные еврокубка этой карьеры или None, если клуб игрока не участвует."""
     data = await asyncio.to_thread(_load_data_sync, _euro_path(user_id))
     return data if isinstance(data, dict) and data else None
 
@@ -1206,7 +1241,6 @@ async def delete_euro(user_id):
 
 
 async def migrate_euro_file():
-    """Один раз переносит старый общий euro_qualification.json в файлы по карьерам."""
     if not os.path.exists(EURO_FILE):
         return
     legacy = await asyncio.to_thread(_load_data_sync, EURO_FILE)
@@ -1230,13 +1264,6 @@ def _rating_rank_in_division(club, division):
 
 
 async def determine_euro_participants(user_id, club, division, old_club=None, old_division=None):
-    """Участники еврокубков нового сезона для конкретной карьеры.
-
-    Реальные места берутся из таблицы лиги, в которой игрок закончил сезон
-    (old_division). Клуб, в который игрок перешёл в другой лиге, квалифицируется
-    по месту в рейтинге клубов своей лиги. Остальные места добираются клубами
-    топ-лиг, но клуб игрока туда «случайно» попасть не может.
-    """
     tables = await load_data(TABLES_FILE)
     buckets = {t: [] for t in EURO_CUPS}
 
@@ -1253,7 +1280,7 @@ async def determine_euro_participants(user_id, club, division, old_club=None, ol
         if t:
             buckets[t].append(club)
 
-    for t in EURO_CUPS:  # клуб игрока - в начало списка, чтобы его не отрезало при усечении до 36
+    for t in EURO_CUPS:
         if club in buckets[t]:
             buckets[t].remove(club)
             buckets[t].insert(0, club)
@@ -1276,11 +1303,6 @@ async def determine_euro_participants(user_id, club, division, old_club=None, ol
 
 
 async def generate_euro_data(user_id, season, club, division, old_club=None, old_division=None):
-    """Создаёт еврокубок нового сезона для карьеры user_id.
-
-    Возвращает (euro_data, tournament). Если клуб не квалифицировался -
-    старые данные удаляются и возвращается (None, None).
-    """
     participants = await determine_euro_participants(user_id, club, division, old_club, old_division)
     tournament = next((t for t in EURO_CUPS if club in participants[t]), None)
     if not tournament:
@@ -1301,7 +1323,6 @@ async def generate_euro_data(user_id, season, club, division, old_club=None, old
         "tour_played": {i: False for i in range(1, EURO_TOTAL_TOURS + 1)}
     }
 
-    # Заполняем только турнир игрока: остальные для этой карьеры не нужны
     clubs = participants[tournament]
     euro_data[tournament]["clubs"] = clubs
     for c in clubs:
@@ -1317,8 +1338,6 @@ async def generate_euro_data(user_id, season, club, division, old_club=None, old
 
 
 async def assign_euro_for_new_season(user_id, p, season, old_club, old_division):
-    """Создаёт еврокубок для новой карьеры-сезона и обновляет поля игрока.
-    Возвращает ключ турнира или None. Вызывать ДО сброса таблицы лиги."""
     _, tournament = await generate_euro_data(
         user_id, season, p["club"], p["division"], old_club, old_division
     )
@@ -1620,7 +1639,6 @@ async def generate_euro_playoffs(euro_data, tournament):
     euro_data["playoffs"][tournament]["top8"] = top8
 
 
-
 async def simulate_playoff_round(euro_data, tournament, player_club=None, player_won=None):
     playoffs = euro_data["playoffs"][tournament]
     pairs = playoffs.get("playoff_round", [])
@@ -1727,8 +1745,6 @@ async def advance_playoff_round(euro_data, tournament, from_stage, player_club=N
     euro_data["playoffs"][tournament][next_stage] = next_pairs
     euro_data["playoffs"][tournament]["current_stage"] = next_stage
     return euro_data
-
-
 # ========== ГЛАВНОЕ МЕНЮ ==========
 
 async def main_menu_keyboard(username: str = None, user_id: str = None):
@@ -1774,6 +1790,183 @@ async def send_auto_delete_message(message: Message, text: str, parse_mode: str 
         await sent.delete()
     except Exception:
         pass
+
+
+# ============================================================
+# КАРТИНКИ ДЛЯ МОМЕНТОВ
+# ============================================================
+
+async def get_moment_image(scenario_key: str):
+    if not scenario_key:
+        return None
+    images = await load_data(MOMENT_IMAGES_FILE)
+    lst = images.get(scenario_key) or []
+    return random.choice(lst) if lst else None
+
+
+async def send_or_edit_moment(callback: CallbackQuery, text: str, kb, scenario_key: str):
+    photo = await get_moment_image(scenario_key)
+
+    if photo:
+        try:
+            if callback.message.photo:
+                await callback.message.edit_media(
+                    media=InputMediaPhoto(media=photo, caption=text, parse_mode="Markdown"),
+                    reply_markup=kb
+                )
+            else:
+                await callback.message.delete()
+                await callback.message.answer_photo(
+                    photo=photo, caption=text, parse_mode="Markdown", reply_markup=kb
+                )
+            return
+        except TelegramBadRequest as e:
+            if "message is not modified" in str(e):
+                return
+            logging.warning(f"send_or_edit_moment photo error: {e}")
+        except Exception as e:
+            logging.warning(f"send_or_edit_moment photo error: {e}")
+
+    # фолбэк на текст
+    try:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+        else:
+            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+
+
+# ============================================================
+# АДМИН-КОМАНДЫ ДЛЯ КАРТИНОК
+# ============================================================
+
+@dp.message(F.photo)
+async def save_moment_image(message: Message):
+    username = (message.from_user.username or "").replace("@", "")
+    if username not in ADMINS:
+        return
+
+    key = (message.caption or "").strip().lower()
+
+    if not key and message.reply_to_message and message.reply_to_message.text:
+        parts = message.reply_to_message.text.split()
+        if len(parts) == 2 and parts[0].startswith("/set"):
+            key = parts[1].strip().lower()
+
+    if not key:
+        return await message.answer(
+            "❌ Не вижу ключ.\n"
+            "Кинь фото с подписью-ключом (например: `st_one_on_one`)\n"
+            "или ответь на это фото командой `/set st_one_on_one`.\n\n"
+            "Список всех ключей: /moment_keys",
+            parse_mode="Markdown"
+        )
+
+    if key not in MOMENT_KEYS:
+        return await message.answer(
+            f"❌ Неизвестный ключ: `{key}`\n"
+            f"Список ключей: /moment_keys",
+            parse_mode="Markdown"
+        )
+
+    file_id = message.photo[-1].file_id
+
+    images = await load_data(MOMENT_IMAGES_FILE)
+    images.setdefault(key, [])
+
+    if file_id in images[key]:
+        return await message.answer(f"⚠️ Это фото уже привязано к `{key}`.", parse_mode="Markdown")
+
+    images[key].append(file_id)
+    if len(images[key]) > 3:
+        images[key] = images[key][-3:]
+
+    await save_data(MOMENT_IMAGES_FILE, images)
+
+    await message.answer(
+        f"✅ `{key}` → сохранено ({len(images[key])}/3)\n"
+        f"_{MOMENT_KEYS_DESC.get(key, '')}_",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(Command("set"))
+async def set_cmd(message: Message):
+    username = (message.from_user.username or "").replace("@", "")
+    if username not in ADMINS:
+        return
+    await message.answer(
+        "📸 **Как привязать фото к моменту:**\n"
+        "1. Отправь фото боту.\n"
+        "2. В подписи к фото укажи ключ (например `st_one_on_one`).\n\n"
+        "Либо: ответь на уже отправленное фото командой `/set <ключ>`.\n\n"
+        "Список ключей: /moment_keys\n"
+        "Статистика: /moment_stats",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(Command("moment_keys"))
+async def moment_keys_cmd(message: Message):
+    username = (message.from_user.username or "").replace("@", "")
+    if username not in ADMINS:
+        return
+
+    images = await load_data(MOMENT_IMAGES_FILE)
+
+    groups = {
+        "⚽ Нападающий (ST)": [k for k in MOMENT_KEYS if k.startswith("st_")],
+        "🪄 Полузащитник (CM)": [k for k in MOMENT_KEYS if k.startswith("cm_")],
+        "🛡️ Защитник (CB)": [k for k in MOMENT_KEYS if k.startswith("cb_")],
+        "🧤 Вратарь (GK)": [k for k in MOMENT_KEYS if k.startswith("gk_")],
+        "🎬 Общие": [k for k in MOMENT_KEYS if k in ("goal_celebration", "save_moment", "card_moment")],
+    }
+
+    text = "📋 **КЛЮЧИ МОМЕНТОВ**\n━━━━━━━━━━━━━━━━━━━━\n"
+    for group_name, keys in groups.items():
+        text += f"\n**{group_name}**\n"
+        for k in sorted(keys):
+            count = len(images.get(k, []))
+            check = "✅" if count > 0 else "⬜"
+            text += f"{check} `{k}` — {MOMENT_KEYS_DESC.get(k, '')} ({count}/3)\n"
+
+    if len(text) > 4000:
+        text = text[:4000] + "\n…обрезано"
+
+    await message.answer(text, parse_mode="Markdown")
+
+
+@dp.message(Command("moment_stats"))
+async def moment_stats_cmd(message: Message):
+    username = (message.from_user.username or "").replace("@", "")
+    if username not in ADMINS:
+        return
+
+    images = await load_data(MOMENT_IMAGES_FILE)
+    total_keys = len(MOMENT_KEYS)
+    filled = sum(1 for k in MOMENT_KEYS if images.get(k))
+    total_photos = sum(len(images.get(k, [])) for k in MOMENT_KEYS)
+    max_photos = total_keys * 3
+
+    missing = [k for k in MOMENT_KEYS if not images.get(k)]
+
+    text = (
+        f"📊 **СТАТИСТИКА КАРТИНОК**\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔑 Ключей заполнено: {filled}/{total_keys}\n"
+        f"🖼 Фото загружено: {total_photos}/{max_photos}\n"
+    )
+
+    if missing:
+        text += f"\n❌ **Пустые ключи** ({len(missing)}):\n"
+        text += ", ".join(f"`{k}`" for k in missing[:20])
+        if len(missing) > 20:
+            text += f"\n…и ещё {len(missing) - 20}"
+
+    await message.answer(text, parse_mode="Markdown")
 
 
 # ============================================================
@@ -2393,6 +2586,19 @@ async def euro_moment_next_handler(callback: CallbackQuery, state: FSMContext):
         await generate_euro_moment(callback, state, user_id)
 
 
+def _pick_scenario_key(position: str, is_playoff: bool = False) -> str:
+    """Простой выбор ключа картинки по позиции — используется, пока нет полноценных сценариев."""
+    if position == "GK":
+        pool = ["gk_one_on_one", "gk_long_shot", "gk_close_shot", "gk_cross", "gk_corner"]
+    elif position == "CB":
+        pool = ["cb_dribbler", "cb_last_defender", "cb_cross", "cb_corner_def", "cb_aerial", "cb_counter"]
+    elif position == "CM":
+        pool = ["cm_midfield", "cm_through_ball", "cm_counter", "cm_press", "cm_tackle", "cm_wing"]
+    else:
+        pool = ["st_one_on_one", "st_counter", "st_penalty_area", "st_header", "st_wing", "st_free_kick"]
+    return random.choice(pool)
+
+
 async def generate_euro_moment(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
     match = data.get("euro_match")
@@ -2487,10 +2693,8 @@ async def generate_euro_moment(callback: CallbackQuery, state: FSMContext, user_
              InlineKeyboardButton(text="📐 Отдать пас", callback_data="euro_act_pass")]
         ])
 
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except Exception:
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    scenario_key = _pick_scenario_key(position)
+    await send_or_edit_moment(callback, text, kb, scenario_key)
 
 
 @dp.callback_query(F.data == "euro_group_results")
@@ -2587,7 +2791,6 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     current_stage = playoffs.get("current_stage", "playoff_round")
     top8 = playoffs.get("top8", []) or []
 
-    # Если игрок вылетел
     if p.get("euro_tournament") == "none" or p.get("euro_playoff_stage") == "eliminated":
         try:
             await callback.message.edit_text(
@@ -2604,7 +2807,6 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
             pass
         return
 
-    # Ищем соперника игрока в текущей стадии
     player_in_stage = False
     opponent = None
     pairs_to_show = playoffs.get(current_stage, []) or []
@@ -2639,7 +2841,6 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
 
     buttons = []
 
-    # === ЕСЛИ СТАДИЯ СТЫКОВ ===
     if current_stage == "playoff_round":
         if p["club"] in top8:
             text += "\n🎉 Ты в топ-8 и **пропускаешь стыковые матчи**!\n"
@@ -2668,7 +2869,6 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
             except TelegramBadRequest:
                 pass
             return
-    # === ЕСЛИ СТАДИЯ НЕ СТЫКОВ ===
     else:
         if player_in_stage:
             if p.get("trust", 15) >= 21:
@@ -3027,9 +3227,7 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
         return
 
     if p.get(f"{stage}_played", False):
-        # Проверяем, что матч реально был в этом сезоне
         if p.get("euro_playoff_stage") != stage:
-            # Игрок в этой стадии — значит флаг устаревший
             p.pop(f"{stage}_played", None)
         else:
             await callback.answer("Ты уже сыграл этот матч!")
@@ -3173,10 +3371,8 @@ async def euro_playoff_moment(callback: CallbackQuery, state: FSMContext, user_i
              InlineKeyboardButton(text="📐 Отдать пас", callback_data="euro_act_pass")]
         ])
 
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except Exception:
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    scenario_key = _pick_scenario_key(position, is_playoff=True)
+    await send_or_edit_moment(callback, text, kb, scenario_key)
 
 
 @dp.callback_query(F.data == "euro_shoot_menu")
@@ -3365,8 +3561,6 @@ async def euro_cb_action_handler(callback: CallbackQuery, state: FSMContext):
         await euro_playoff_moment(callback, state, user_id)
     else:
         await generate_euro_moment(callback, state, user_id)
-
-
 async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
     match = data.get("euro_match")
@@ -3510,12 +3704,9 @@ async def finish_euro_match(callback: CallbackQuery, state: FSMContext, user_id:
 
     await state.clear()
     kb = await main_menu_keyboard(callback.from_user.username, user_id)
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except Exception:
-        if callback.message.photo:
-            await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+
+    # пробуем с картинкой празднования, иначе текст
+    await send_or_edit_moment(callback, text, kb, "goal_celebration")
 
 
 async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, user_id: str):
@@ -3716,12 +3907,8 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
 
     await state.clear()
     kb = await main_menu_keyboard(callback.from_user.username, user_id)
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except Exception:
-        if callback.message.photo:
-            await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+
+    await send_or_edit_moment(callback, text, kb, "goal_celebration")
 
 
 # ============================================================
@@ -4250,10 +4437,8 @@ async def adm_skip_season(callback: CallbackQuery):
             p = players[target_id]
             old_club, old_division = p["club"], p["division"]
 
-            # тот же сброс, что и при обычном переходе в новый сезон
             _apply_new_season_reset(p)
 
-            # еврокубок нового сезона - до сброса таблицы лиги (места берутся из неё)
             await assign_euro_for_new_season(target_id, p, p["season"], old_club, old_division)
 
             players[target_id] = p
@@ -4955,8 +5140,6 @@ async def profile_handler(callback: CallbackQuery):
             await callback.message.edit_text(text, reply_markup=kb)
         except Exception:
             await callback.message.answer(text, reply_markup=kb)
-
-
 # ============================================================
 # ОСНОВНОЙ МАТЧ ЛИГИ
 # ============================================================
@@ -5040,8 +5223,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     if await deny_if_retired_cb(callback, p):
         return
 
-    # Конец сезона - до веток резерва/травмы/усталости, иначе они бесконечно
-    # наращивают тур и таблицу, а итоги сезона так и не показываются.
     if p.get("tour", 1) > 30:
         return await season_results_handler(callback)
 
@@ -5261,7 +5442,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             rival_pool = [c for c in CLUBS[p["division"]] if c != p["club"]]
             p["played_league_rivals"] = []
 
-    # сохраняем и лигу, и кубок (раньше кубковый матч терял +1 игру и усталость)
     players[user_id] = p
     await save_data(PLAYERS_FILE, players)
 
@@ -5360,6 +5540,7 @@ async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: s
              InlineKeyboardButton(text="🧤 Прыгнуть в правый угол", callback_data="gk_act:right")],
             [InlineKeyboardButton(text="🏃 Сблизить дистанцию", callback_data="gk_act:rush")]
         ])
+        scenario_key = "gk_one_on_one"
     elif p["position"] == "CB":
         if random.random() < 0.75:
             text += "🛡️ **Форвард соперника идет на дриблинге прямо в твою зону!**"
@@ -5368,24 +5549,24 @@ async def generate_moment(callback: CallbackQuery, state: FSMContext, user_id: s
                  InlineKeyboardButton(text="🕴️ Встретить корпусом", callback_data="cb_act:tackle_smart")],
                 [InlineKeyboardButton(text="📐 Отдать пас ближнему", callback_data="act:pass")]
             ])
+            scenario_key = "cb_dribbler"
         else:
             text += "🔥 **Ты подключился на угловой! Мяч летит к тебе!**"
             kb = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="🎯 Пробить головой", callback_data="act:shoot_menu"),
                  InlineKeyboardButton(text="📐 Сбросить под удар партнеру", callback_data="act:pass")]
             ])
+            scenario_key = "cb_corner_attack"
     else:
         text += "🔥 **Ты контролируешь мяч на подступах к штрафной! Твое решение?**"
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🎯 Пробить по воротам", callback_data="act:shoot_menu"),
              InlineKeyboardButton(text="📐 Отдать пас", callback_data="act:pass")]
         ])
+        scenario_key = "st_penalty_area" if p["position"] == "ST" else "cm_midfield"
 
     await state.update_data(match=m)
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except Exception:
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    await send_or_edit_moment(callback, text, kb, scenario_key)
 
 
 @dp.callback_query(F.data.startswith("gk_act:"))
@@ -5494,8 +5675,7 @@ async def act_shoot_execute_handler(callback: CallbackQuery, state: FSMContext):
         score_chance -= 0.15
         gk_guessed = True
     else:
-        score_chance += 0.10
-        gk_guessed = False
+        score_chance += 0.10        gk_guessed = False
     score_chance = max(0.05, min(0.95, score_chance))
 
     if random.random() < score_chance:
@@ -5708,7 +5888,6 @@ async def finish_match(callback: CallbackQuery, state: FSMContext, user_id: str,
 
     sponsor_line = (f"💼 Доход от {p.get('sponsor')}: +{sponsor_income}$\n" if sponsor_income else "")
 
-
     text = (
         f"🏁 **МАТЧ ЗАВЕРШЕН!**\n"
         f"⚔️ **{p['club']} {m['my_team_score']} : {m['rival_team_score']} {m['rival']}**\n"
@@ -5723,12 +5902,37 @@ async def finish_match(callback: CallbackQuery, state: FSMContext, user_id: str,
     )
 
     kb = await main_menu_keyboard(callback.from_user.username, user_id)
-    try:
-        await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except Exception:
-        if callback.message.photo:
-            await callback.message.delete()
-        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+
+    # финальная картинка празднования, если есть, иначе текст
+    final_photo = await get_moment_image("goal_celebration")
+    if final_photo:
+        try:
+            if callback.message.photo:
+                await callback.message.edit_media(
+                    media=InputMediaPhoto(media=final_photo, caption=text, parse_mode="Markdown"),
+                    reply_markup=kb
+                )
+            else:
+                await callback.message.delete()
+                await callback.message.answer_photo(
+                    photo=final_photo, caption=text, parse_mode="Markdown", reply_markup=kb
+                )
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                if callback.message.photo:
+                    await callback.message.delete()
+                await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            if callback.message.photo:
+                await callback.message.delete()
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+    else:
+        try:
+            await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
+        except Exception:
+            if callback.message.photo:
+                await callback.message.delete()
+            await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
     if rating_performance >= 9.0:
         await start_interview(callback, state, user_id, p)
@@ -5904,7 +6108,6 @@ async def interview_handler(callback: CallbackQuery, state: FSMContext):
 # ============================================================
 
 def _season_choice_pending(p: dict) -> bool:
-    """True, если итоги сезона уже подведены и игрок ещё не выбрал клуб."""
     return bool(p.get("_season_pending") or p.get("_season_offers"))
 
 
@@ -5935,7 +6138,6 @@ def _format_awards_text(awards, bonuses) -> str:
 
 
 async def _send_season_results(callback: CallbackQuery, p: dict):
-    """Рисует экран итогов сезона по уже сохранённым данным. Профиль НЕ меняет."""
     offers = p.get("_season_offers", [])
     season_num = p.get("_season_num", p.get("season", 1))
 
@@ -5980,9 +6182,6 @@ async def season_results_handler(callback: CallbackQuery):
     if await deny_if_retired_cb(callback, p):
         return
 
-    # Итоги уже подведены (возраст, трофеи и награды начислены) - только показываем экран.
-    # Раньше каждое повторное нажатие «Итоги сезона» ещё раз старило игрока,
-    # дублировало трофей и заново выдавало награды.
     if _season_choice_pending(p):
         return await _send_season_results(callback, p)
 
@@ -6040,8 +6239,6 @@ async def season_results_handler(callback: CallbackQuery):
         await add_to_retired_leaderboard(p["name"], p["rating"], len(p.get("trophies", [])))
 
     if retired_now:
-        # Сначала сохраняем пенсию, возраст и трофей - раньше профиль перечитывался из файла
-        # и флаг retired терялся: «карьера завершена», а игрок продолжал играть.
         players[user_id] = p
         await save_data(PLAYERS_FILE, players)
 
@@ -6083,7 +6280,6 @@ async def season_results_handler(callback: CallbackQuery):
         offers = [o for o in offers if o["division"] != forced_div][:3]
         offers.insert(0, forced_offer)
 
-    # Помечаем «итоги подведены»: с этого момента повторные вызовы только показывают экран
     p["_season_pending"] = True
     p["_season_offers"] = offers
     p["_season_num"] = season_num
@@ -6115,7 +6311,6 @@ def _apply_new_season_reset(p: dict):
     p["cup_rivals"] = []
     p["train_done"] = False
     p["fatigue"] = max(0, p.get("fatigue", 0) - 30)
-    # еврокубки прошлого сезона: флаги плей-офф и счётчики не должны переезжать в новый сезон
     for key in EURO_PLAYOFF_FLAGS:
         p.pop(key, None)
     p["euro_playoff_stage"] = None
@@ -6136,9 +6331,6 @@ async def season_choice_handler(callback: CallbackQuery):
     if not p:
         return await callback.answer("⚠️ Профиль не найден. Нажми /start.", show_alert=True)
 
-    # Выбор клуба возможен только после итогов сезона и только один раз. Старые кнопки
-    # (например «Продлить контракт») раньше срабатывали повторно: росла зарплата, шёл
-    # следующий сезон, сбрасывались тур, таблица и еврокубки.
     if not _season_choice_pending(p):
         return await callback.answer(
             "⚠️ Этот выбор уже неактуален: клуб на новый сезон уже выбран.", show_alert=True
@@ -6180,8 +6372,6 @@ async def season_choice_handler(callback: CallbackQuery):
 
     _apply_new_season_reset(p)
 
-    # Еврокубок этой карьеры на новый сезон. Места берутся из таблицы лиги, которая
-    # ещё не сброшена (init_tables_for_user ниже), и по СТАРОМУ клубу/лиге.
     euro_tournament = await assign_euro_for_new_season(user_id, p, p["season"], old_club, old_division)
     if euro_tournament:
         club_line += f"\n\n🌍 {get_euro_name(euro_tournament)}!"
@@ -6218,6 +6408,7 @@ async def ensure_files_exist():
         SLOTS_FILE: {},
         AWARDS_FILE: {},
         NPC_FILE: {},
+        MOMENT_IMAGES_FILE: {},
     }
     for filename, default_value in files_defaults.items():
         if not os.path.exists(filename):
@@ -6236,6 +6427,7 @@ async def main():
     print("📌 NPC-статы ограничены реалистичными рамками")
     print("📌 Лучший клуб: очки + дивизион + трофеи + еврокубки")
     print("📌 Статистика лиги: бомбардиры, ассистенты, вратари, защитники")
+    print("📌 Картинки моментов: /set, /moment_keys, /moment_stats")
 
     await ensure_files_exist()
     os.makedirs(EURO_DIR, exist_ok=True)
