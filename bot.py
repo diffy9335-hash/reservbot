@@ -6,7 +6,6 @@ import random
 import json
 import os
 import time
-import io
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -15,7 +14,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.exceptions import TelegramBadRequest
-from PIL import Image, ImageDraw, ImageFont
 
 logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = "8979310355:AAGPshB3WEGHVx33ZPjd9uIxQpY8wrGmy_8"
@@ -37,6 +35,7 @@ EURO_DIR = "euro_data"
 AWARDS_FILE = "awards.json"
 NPC_FILE = "npc_players.json"
 MOMENT_IMAGES_FILE = "moment_images.json"
+PROFILE_IMAGES_FILE = "profile_images.json"
 
 
 MOMENT_KEYS = {
@@ -90,12 +89,7 @@ MOMENT_KEYS_DESC = {
 }
 
 
-# ============================================================
-# СЦЕНАРИИ МОМЕНТОВ
-# ============================================================
-
 MOMENT_SCENARIOS = {
-    # ----------------- НАПАДАЮЩИЙ -----------------
     "st_one_on_one": {
         "text": "🔥 **Выход один на один!** Вратарь выбежал навстречу, у тебя доля секунды на решение.",
         "actions": [
@@ -164,8 +158,6 @@ MOMENT_SCENARIOS = {
             ("👇 Силовой в центр", "m_penalty:power"),
         ],
     },
-
-    # ----------------- ПОЛУЗАЩИТНИК -----------------
     "cm_midfield": {
         "text": "⚔️ **Борьба в центре поля.** Соперник идёт на тебя.",
         "actions": [
@@ -234,8 +226,6 @@ MOMENT_SCENARIOS = {
             ("🏃 Пробежать по флангу", "m_run:wing"),
         ],
     },
-
-    # ----------------- ЗАЩИТНИК -----------------
     "cb_dribbler": {
         "text": "🛡️ **Форвард соперника идёт на дриблинге прямо в твою зону!**",
         "actions": [
@@ -303,8 +293,6 @@ MOMENT_SCENARIOS = {
             ("🕴️ Держать позицию", "m_idle:stay"),
         ],
     },
-
-    # ----------------- ВРАТАРЬ -----------------
     "gk_one_on_one": {
         "text": "🚨 **Нападающий выходит один на один!** Твои действия?",
         "actions": [
@@ -402,10 +390,6 @@ def _moment_count(trust: int, rating: float) -> int:
         base += 1
     return max(3, min(7, base))
 
-
-# ============================================================
-# ЗАГРУЗКА / СОХРАНЕНИЕ ДАННЫХ
-# ============================================================
 
 def _load_data_sync(filename):
     if os.path.exists(filename):
@@ -1032,9 +1016,7 @@ async def heal_injury_if_needed(user_id: str):
             p["injury_tours"] = 0
         players[user_id] = p
         await save_data(PLAYERS_FILE, players)
-# ============================================================
-# NPC + НОМИНАЦИИ
-# ============================================================
+
 
 FIRST_NAMES = [
     "Александр", "Дмитрий", "Максим", "Иван", "Артём", "Никита", "Егор", "Кирилл",
@@ -1370,8 +1352,6 @@ async def apply_awards_bonuses(user_id, awards, season_num):
     await save_data(PLAYERS_FILE, players)
     return bonuses
 
-
-# ========== ЕВРОКУБКИ ==========
 
 EURO_TOURNAMENTS = {
     "champions_league": {
@@ -1877,9 +1857,7 @@ async def advance_playoff_round(euro_data, tournament, from_stage, player_club=N
     euro_data["playoffs"][tournament][next_stage] = next_pairs
     euro_data["playoffs"][tournament]["current_stage"] = next_stage
     return euro_data
-# ============================================================
-# ГЛАВНОЕ МЕНЮ
-# ============================================================
+
 
 async def main_menu_keyboard(username: str = None, user_id: str = None):
     match_btn_text = "🎮 Матч"
@@ -1926,16 +1904,17 @@ async def send_auto_delete_message(message: Message, text: str, parse_mode: str 
         pass
 
 
-# ============================================================
-# КАРТИНКИ МОМЕНТОВ
-# ============================================================
-
 async def get_moment_image(scenario_key: str):
     if not scenario_key:
         return None
     images = await load_data(MOMENT_IMAGES_FILE)
     lst = images.get(scenario_key) or []
     return random.choice(lst) if lst else None
+
+
+async def get_profile_image(user_id: str):
+    images = await load_data(PROFILE_IMAGES_FILE)
+    return images.get(user_id)
 
 
 async def send_or_edit_moment(callback: CallbackQuery, text: str, kb, scenario_key: str):
@@ -1972,37 +1951,56 @@ async def send_or_edit_moment(callback: CallbackQuery, text: str, kb, scenario_k
 
 
 @dp.message(F.photo)
-async def save_moment_image(message: Message):
+async def save_photo_handler(message: Message):
     username = (message.from_user.username or "").replace("@", "")
     if username not in ADMINS:
         return
-    key = (message.caption or "").strip().lower()
+    key = (message.caption or "").strip()
     if not key and message.reply_to_message and message.reply_to_message.text:
         parts = message.reply_to_message.text.split()
         if len(parts) == 2 and parts[0].startswith("/set"):
-            key = parts[1].strip().lower()
+            key = parts[1].strip()
     if not key:
         return await message.answer(
-            "❌ Не вижу ключ.\nКинь фото с подписью-ключом (например `st_one_on_one`).\n"
-            "Список: /moment_keys",
+            "❌ Не вижу ключ.\nКинь фото с подписью-ключом (например `st_one_on_one`)\n"
+            "или `profile_<user_id>` для фото профиля.\nСписок: /moment_keys",
             parse_mode="Markdown"
         )
-    if key not in MOMENT_KEYS:
+
+    if key.startswith("profile_"):
+        target_uid = key[len("profile_"):].strip()
+        players = await load_data(PLAYERS_FILE)
+        if target_uid not in players:
+            return await message.answer(
+                f"❌ Профиль `{target_uid}` не найден в players.json.",
+                parse_mode="Markdown"
+            )
+        file_id = message.photo[-1].file_id
+        images = await load_data(PROFILE_IMAGES_FILE)
+        images[target_uid] = file_id
+        await save_data(PROFILE_IMAGES_FILE, images)
         return await message.answer(
-            f"❌ Неизвестный ключ: `{key}`\nСписок: /moment_keys",
+            f"✅ Фото профиля для `{target_uid}` сохранено.",
+            parse_mode="Markdown"
+        )
+
+    key_lower = key.lower()
+    if key_lower not in MOMENT_KEYS:
+        return await message.answer(
+            f"❌ Неизвестный ключ: `{key_lower}`\nСписок: /moment_keys",
             parse_mode="Markdown"
         )
     file_id = message.photo[-1].file_id
     images = await load_data(MOMENT_IMAGES_FILE)
-    images.setdefault(key, [])
-    if file_id in images[key]:
-        return await message.answer(f"⚠️ Уже привязано к `{key}`.", parse_mode="Markdown")
-    images[key].append(file_id)
-    if len(images[key]) > 3:
-        images[key] = images[key][-3:]
+    images.setdefault(key_lower, [])
+    if file_id in images[key_lower]:
+        return await message.answer(f"⚠️ Уже привязано к `{key_lower}`.", parse_mode="Markdown")
+    images[key_lower].append(file_id)
+    if len(images[key_lower]) > 3:
+        images[key_lower] = images[key_lower][-3:]
     await save_data(MOMENT_IMAGES_FILE, images)
     await message.answer(
-        f"✅ `{key}` → сохранено ({len(images[key])}/3)\n_{MOMENT_KEYS_DESC.get(key, '')}_",
+        f"✅ `{key_lower}` → сохранено ({len(images[key_lower])}/3)\n_{MOMENT_KEYS_DESC.get(key_lower, '')}_",
         parse_mode="Markdown"
     )
 
@@ -2013,8 +2011,10 @@ async def set_cmd(message: Message):
     if username not in ADMINS:
         return
     await message.answer(
-        "📸 Кинь фото боту с подписью-ключом.\nЛибо ответь на фото командой `/set <ключ>`.\n\n"
-        "Список: /moment_keys\nСтатистика: /moment_stats",
+        "📸 Кинь фото боту с подписью-ключом.\n"
+        "Для моментов: `st_one_on_one`, `gk_penalty` и т.д.\n"
+        "Для профиля игрока: `profile_<user_id>` (например `profile_123456789_1`).\n\n"
+        "Список моментов: /moment_keys\nСтатистика: /moment_stats",
         parse_mode="Markdown"
     )
 
@@ -2039,6 +2039,7 @@ async def moment_keys_cmd(message: Message):
             cnt = len(images.get(k, []))
             check = "✅" if cnt > 0 else "⬜"
             text += f"{check} `{k}` — {MOMENT_KEYS_DESC.get(k, '')} ({cnt}/3)\n"
+    text += "\n🖼 **Фото профиля:** `profile_<user_id>` (например `profile_123456789_1`)"
     if len(text) > 4000:
         text = text[:4000] + "\n…обрезано"
     await message.answer(text, parse_mode="Markdown")
@@ -2054,15 +2055,16 @@ async def moment_stats_cmd(message: Message):
     filled = sum(1 for k in MOMENT_KEYS if images.get(k))
     photos = sum(len(images.get(k, [])) for k in MOMENT_KEYS)
     missing = [k for k in MOMENT_KEYS if not images.get(k)]
-    text = f"📊 **СТАТИСТИКА КАРТИНОК**\n🔑 {filled}/{total}\n🖼 {photos}/{total * 3}\n"
+    profiles = await load_data(PROFILE_IMAGES_FILE)
+    text = (f"📊 **СТАТИСТИКА КАРТИНОК**\n🔑 {filled}/{total}\n🖼 {photos}/{total * 3}\n"
+            f"👤 Фото профилей: {len(profiles)}")
     if missing:
-        text += f"\n❌ Пусто ({len(missing)}):\n" + ", ".join(f"`{k}`" for k in missing[:20])
+        text += f"\n\n❌ Пусто ({len(missing)}):\n" + ", ".join(f"`{k}`" for k in missing[:20])
     await message.answer(text, parse_mode="Markdown")
 
 
-# ============================================================
-# НОВАЯ МЕХАНИКА МОМЕНТОВ (СНИЖЕННЫЕ ШАНСЫ)
-# ============================================================
+GOAL_CHANCE_MULTIPLIER = 0.45
+
 
 async def _show_moment(callback: CallbackQuery, state: FSMContext, user_id: str, m: dict,
                        scenario_key: str, match_ctx: str = "match"):
@@ -2120,8 +2122,8 @@ async def _show_moment(callback: CallbackQuery, state: FSMContext, user_id: str,
 
 
 def _action_chance(base: float, p: dict, rival_rating: int, bonus: float = 0.0) -> float:
-    """Сниженный коэффициент рейтинга (0.008 вместо 0.015)."""
-    chance = base + ((p.get("rating", 40) - rival_rating) * 0.008) + bonus
+    chance = base + ((p.get("rating", 40) - rival_rating) * 0.010) + bonus
+    chance *= GOAL_CHANCE_MULTIPLIER
     return max(0.02, min(0.85, chance))
 
 
@@ -2155,18 +2157,17 @@ async def _handle_moment_action(callback: CallbackQuery, state: FSMContext, user
         else:
             m["opponent_score"] += 1
 
-    # УДАРЫ — снижены с ~0.55 до ~0.10-0.28
     if kind == "m_shoot":
         shot_cfg = {
             "near": (0.28, "в ближний угол"),
-            "far": (0.22, "в дальний угол"),
-            "long": (0.10, "с дистанции"),
-            "header": (0.20, "головой"),
-            "topcorner": (0.15, "в девятку"),
+            "far": (0.24, "в дальний угол"),
+            "long": (0.12, "с дистанции"),
+            "header": (0.22, "головой"),
+            "topcorner": (0.18, "в девятку"),
             "power": (0.22, "силовым"),
-            "cut_inside": (0.25, "сместившись в центр"),
+            "cut_inside": (0.26, "сместившись в центр"),
         }
-        base, desc = shot_cfg.get(param, (0.22, "по воротам"))
+        base, desc = shot_cfg.get(param, (0.25, "по воротам"))
         if random.random() < _action_chance(base, p, rival_rating):
             m["goals"] += 1
             _add_goal()
@@ -2174,37 +2175,42 @@ async def _handle_moment_action(callback: CallbackQuery, state: FSMContext, user
         else:
             m["log"] += f"❌ **{minute}'** | Удар {desc} — мимо или вратарь парирует.\n"
 
-    # ПАСЫ — снижены. Гол партнёра после паса теперь редкость.
     elif kind == "m_pass":
         pass_cfg = {
-            "open": (0.30, "на пустые ворота"),
-            "through": (0.18, "проникающий"),
-            "knockdown": (0.22, "скидка"),
-            "cross": (0.18, "прострел"),
-            "forward": (0.15, "вперёд"),
-            "safe": (0.45, "поперёк"),
-            "long": (0.20, "длинный заброс"),
+            "open": (0.40, "на пустые ворота"),
+            "through": (0.24, "проникающий"),
+            "knockdown": (0.28, "скидка"),
+            "cross": (0.22, "прострел"),
+            "forward": (0.35, "вперёд"),
+            "safe": (0.90, "поперёк"),
+            "long": (0.25, "длинный заброс"),
         }
-        base, desc = pass_cfg.get(param, (0.25, "пас"))
+        base, desc = pass_cfg.get(param, (0.30, "пас"))
         if random.random() < _action_chance(base, p, rival_rating):
-            m["assists"] += 1
-            _add_goal()
-            m["log"] += f"✅ **{minute}'** | {desc.capitalize()} пас — партнёр забивает! ГОЛ!\n"
+            if param in ("open", "through", "knockdown", "cross", "long"):
+                m["assists"] += 1
+                _add_goal()
+                m["log"] += f"✅ **{minute}'** | {desc.capitalize()} пас — партнёр забивает! ГОЛ!\n"
+            else:
+                m["log"] += f"✅ **{minute}'** | {desc.capitalize()} пас дошёл.\n"
         else:
             m["log"] += f"❌ **{minute}'** | {desc.capitalize()} пас перехвачен.\n"
 
-    # ФИНТЫ — теперь без гола, только 20% на ассист.
     elif kind == "m_dribble":
         dribble_cfg = {
-            "keeper": (0.35, "Ты обвёл вратаря и закатил в пустые!"),
-            "burst": (0.45, "Ты финтом ушёл от защитника!"),
-            "body": (0.55, "Ты корпусом закрыл мяч."),
-            "wing": (0.40, "Ты обыграл защитника на фланге!"),
+            "keeper": (0.20, "Ты обвёл вратаря и закатил в пустые!"),
+            "burst": (0.30, "Ты финтом ушёл от защитника!"),
+            "body": (0.35, "Ты корпусом закрыл мяч."),
+            "wing": (0.28, "Ты обыграл защитника на фланге!"),
         }
-        base, success_text = dribble_cfg.get(param, (0.45, "Финт удался!"))
-        if random.random() < _action_chance(base, p, rival_rating, bonus=0.03):
+        base, success_text = dribble_cfg.get(param, (0.28, "Финт удался!"))
+        if random.random() < _action_chance(base, p, rival_rating, bonus=0.02):
             roll = random.random()
-            if roll < 0.20:
+            if roll < 0.25:
+                m["goals"] += 1
+                _add_goal()
+                m["log"] += f"🌀 **{minute}'** | {success_text} ГОЛ!\n"
+            elif roll < 0.45:
                 m["assists"] += 1
                 _add_goal()
                 m["log"] += f"🌀 **{minute}'** | {success_text} Партнёр замыкает — ГОЛ!\n"
@@ -2213,21 +2219,18 @@ async def _handle_moment_action(callback: CallbackQuery, state: FSMContext, user
         else:
             m["log"] += f"❌ **{minute}'** | Соперник разгадал финт.\n"
 
-    # ПРОХОДЫ — гол только ~10-18%
     elif kind == "m_run":
         run_cfg = {
-            "solo": (0.15, "Ты прошёл троих и вышел на ворота!"),
-            "turn": (0.45, "Ты развернул атаку."),
-            "wing": (0.40, "Ты промчался по флангу!"),
-            "power": (0.18, "Ты продавил защитника корпусом!"),
-            "chase": (0.35, "Ты догнал форварда и выбил мяч!"),
+            "solo": (0.14, "Ты прошёл троих и вышел на ворота!"),
+            "turn": (0.60, "Ты развернул атаку."),
+            "wing": (0.55, "Ты промчался по флангу!"),
+            "power": (0.20, "Ты продавил защитника корпусом!"),
+            "chase": (0.30, "Ты догнал форварда и выбил мяч!"),
         }
-        base, success_text = run_cfg.get(param, (0.30, "Проход удался!"))
+        base, success_text = run_cfg.get(param, (0.25, "Проход удался!"))
         if random.random() < _action_chance(base, p, rival_rating):
             if param == "chase":
                 m["tackles"] += 1
-                m["log"] += f"🏃 **{minute}'** | {success_text}\n"
-            elif param in ("turn", "wing"):
                 m["log"] += f"🏃 **{minute}'** | {success_text}\n"
             else:
                 m["goals"] += 1
@@ -2236,23 +2239,21 @@ async def _handle_moment_action(callback: CallbackQuery, state: FSMContext, user
         else:
             m["log"] += f"❌ **{minute}'** | Проход не удался.\n"
 
-    # ПРЕССИНГ
     elif kind == "m_press":
-        base = 0.45 if param == "high" else 0.60
+        base = 0.40 if param == "high" else 0.55
         if random.random() < _action_chance(base, p, rival_rating):
             m["tackles"] += 1
             m["log"] += f"⚡ **{minute}'** | Ты отобрал мяч высоким прессингом!\n"
         else:
             m["log"] += f"❌ **{minute}'** | Прессинг не удался.\n"
 
-    # ОТБОРЫ
     elif kind == "m_tackle":
         tackle_cfg = {
-            "hard": (0.45, 0.15, "Мощнейший чистый подкат!"),
-            "body": (0.55, 0.05, "Ты встретил корпусом и отобрал мяч."),
-            "foul": (0.35, 0.45, "Ты сфолил."),
+            "hard": (0.40, 0.15, "Мощнейший чистый подкат!"),
+            "body": (0.50, 0.05, "Ты встретил корпусом и отобрал мяч."),
+            "foul": (0.30, 0.45, "Ты сфолил."),
         }
-        base, foul_risk, success_text = tackle_cfg.get(param, (0.5, 0.1, "Отбор!"))
+        base, foul_risk, success_text = tackle_cfg.get(param, (0.45, 0.1, "Отбор!"))
         if random.random() < foul_risk:
             if random.random() < 0.4:
                 _add_rival_goal()
@@ -2270,24 +2271,21 @@ async def _handle_moment_action(callback: CallbackQuery, state: FSMContext, user
             _add_rival_goal()
             m["log"] += f"⚡ **{minute}'** | Тебя обыграли. Гол.\n"
 
-    # ВЫНОСЫ
     elif kind == "m_clear":
-        clear_cfg = {"head": (0.70, "Ты выбил мяч головой!"), "safe": (0.90, "Выбил в аут.")}
-        base, text_ok = clear_cfg.get(param, (0.7, "Мяч выбит."))
+        clear_cfg = {"head": (0.60, "Ты выбил мяч головой!"), "safe": (0.90, "Выбил в аут.")}
+        base, text_ok = clear_cfg.get(param, (0.6, "Мяч выбит."))
         if random.random() < _action_chance(base, p, rival_rating):
             m["tackles"] += 1
             m["log"] += f"🦶 **{minute}'** | {text_ok}\n"
         else:
             m["log"] += f"❌ **{minute}'** | Вынос не удался.\n"
 
-    # ПРИКРЫТИЕ
     elif kind == "m_shield":
-        if random.random() < _action_chance(0.55, p, rival_rating):
+        if random.random() < _action_chance(0.50, p, rival_rating):
             m["log"] += f"🛡️ **{minute}'** | Ты помешал вратарю.\n"
         else:
             m["log"] += f"⚠️ **{minute}'** | Ты нарушил правила — штрафной.\n"
 
-    # ВРАТАРЬ
     elif kind == "m_gk":
         if param in ("left", "right"):
             save_chance = _action_chance(0.35, p, rival_rating, bonus=p.get("rating", 40) * 0.004)
@@ -2300,62 +2298,61 @@ async def _handle_moment_action(callback: CallbackQuery, state: FSMContext, user
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Гол...\n"
         elif param == "rush":
-            if random.random() < _action_chance(0.50, p, rival_rating, bonus=p.get("rating", 40) * 0.004):
+            if random.random() < _action_chance(0.45, p, rival_rating, bonus=p.get("rating", 40) * 0.004):
                 m["saves"] += 1
                 m["log"] += f"🧤 **{minute}'** | Сократил угол и забрал мяч!\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Перекинули тебя. Гол.\n"
         elif param == "punch":
-            if random.random() < 0.75:
+            if random.random() < 0.70:
                 m["saves"] += 1
                 m["log"] += f"🦶 **{minute}'** | Кулаком выбил мяч!\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Промахнулся — гол.\n"
         elif param == "catch":
-            if random.random() < 0.7:
+            if random.random() < 0.65:
                 m["saves"] += 1
                 m["log"] += f"🧤 **{minute}'** | Забрал навес в руки!\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Мяч выскользнул — гол.\n"
         elif param == "stay":
-            if random.random() < 0.5:
+            if random.random() < 0.50:
                 m["log"] += f"🧤 **{minute}'** | Мяч пролетел мимо ворот.\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Навес замкнули — гол.\n"
         elif param == "reflex":
-            if random.random() < _action_chance(0.40, p, rival_rating, bonus=p.get("rating", 40) * 0.005):
+            if random.random() < _action_chance(0.38, p, rival_rating, bonus=p.get("rating", 40) * 0.005):
                 m["saves"] += 1
                 m["log"] += f"🧤 **{minute}'** | НЕВЕРОЯТНАЯ РЕАКЦИЯ!\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Гол.\n"
         elif param == "foot":
-            if random.random() < 0.55:
+            if random.random() < 0.50:
                 m["saves"] += 1
                 m["log"] += f"🦶 **{minute}'** | Выставил ногу и спас!\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Прошёл под ногой — гол.\n"
         elif param == "center":
-            if random.random() < 0.35:
+            if random.random() < 0.30:
                 m["saves"] += 1
                 m["log"] += f"🧤 **{minute}'** | Отбил удар в центре!\n"
             else:
                 _add_rival_goal()
                 m["log"] += f"⚡ **{minute}'** | Мяч в углу. Гол.\n"
 
-    # ПЕНАЛЬТИ — снижены с 0.75 до 0.40-0.60
     elif kind == "m_penalty":
         if param == "corner":
-            chance = _action_chance(0.60, p, rival_rating)
+            chance = _action_chance(0.65, p, rival_rating)
         elif param == "panenka":
-            chance = _action_chance(0.40, p, rival_rating)
+            chance = _action_chance(0.45, p, rival_rating)
         else:
-            chance = _action_chance(0.50, p, rival_rating)
+            chance = _action_chance(0.55, p, rival_rating)
         if random.random() < chance:
             m["goals"] += 1
             _add_goal()
@@ -2414,14 +2411,13 @@ async def _continue_match(callback: CallbackQuery, state: FSMContext, user_id: s
         else:
             m["opponent_score"] += 1
 
-    # Фоновые события — снижены
-    if random.random() < 0.30:
+    if random.random() < 0.35:
         if random.random() < 0.5:
-            if random.random() < max(0.03, min(0.60, 0.25 - rating_diff * 0.01)):
+            if random.random() < max(0.03, min(0.75, 0.28 - rating_diff * 0.02)):
                 _add_rival_goal()
                 m["log"] += f"⚡ **{m['minute']}'** | ГОЛ! Соперник забивает!\n"
         else:
-            if random.random() < max(0.03, min(0.60, 0.25 + rating_diff * 0.01)):
+            if random.random() < max(0.03, min(0.75, 0.28 + rating_diff * 0.02)):
                 _add_my_goal()
                 m["log"] += f"⚽ **{m['minute']}'** | ГОЛ! Твоя команда забивает!\n"
 
@@ -2467,147 +2463,6 @@ async def _continue_match(callback: CallbackQuery, state: FSMContext, user_id: s
     new_key = _pick_scenario_for_position(p.get("position", "ST"))
     await _show_moment(callback, state, user_id, m, new_key, match_ctx)
 
-
-# ============================================================
-# ГЕНЕРАЦИЯ ФОТО ПРОФИЛЯ
-# ============================================================
-
-async def generate_profile_image(p: dict) -> io.BytesIO:
-    W, H = 800, 1000
-    img = Image.new("RGB", (W, H), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
-
-    GOLD = (212, 175, 55)
-    GOLD_LIGHT = (245, 220, 130)
-    DARK = (35, 35, 35)
-    GRAY = (110, 110, 110)
-
-    def load_font(size, bold=False):
-        candidates = [
-            "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "arial.ttf",
-        ]
-        for path in candidates:
-            try:
-                return ImageFont.truetype(path, size)
-            except Exception:
-                continue
-        return ImageFont.load_default()
-
-    font_title = load_font(52, bold=True)
-    font_name = load_font(40, bold=True)
-    font_sub = load_font(24)
-    font_label = load_font(26)
-    font_big = load_font(64, bold=True)
-    font_mid = load_font(28, bold=True)
-    font_small = load_font(20)
-
-    draw.rectangle([(20, 20), (W - 20, H - 20)], outline=GOLD, width=6)
-    draw.rectangle([(35, 35), (W - 35, H - 35)], outline=GOLD_LIGHT, width=2)
-
-    title = "ПРОФИЛЬ"
-    bbox = draw.textbbox((0, 0), title, font=font_title)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, 60), title, fill=GOLD, font=font_title)
-
-    draw.line([(150, 135), (W - 150, 135)], fill=GOLD, width=3)
-
-    name = p["name"]
-    bbox = draw.textbbox((0, 0), name, font=font_name)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, 165), name, fill=DARK, font=font_name)
-
-    sub = f"{p.get('nation', 'Россия')} · {p.get('age', 17)} лет"
-    bbox = draw.textbbox((0, 0), sub, font=font_sub)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, 220), sub, fill=GRAY, font=font_sub)
-
-    draw.line([(120, 270), (W - 120, 270)], fill=GOLD_LIGHT, width=2)
-
-    rating_label = "РЕЙТИНГ"
-    bbox = draw.textbbox((0, 0), rating_label, font=font_label)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, 300), rating_label, fill=GRAY, font=font_label)
-
-    rating = f"{p.get('rating', 40)}"
-    bbox = draw.textbbox((0, 0), rating, font=font_big)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, 335), rating, fill=GOLD, font=font_big)
-
-    club = f"{p['club']}  ·  {p['position']}"
-    bbox = draw.textbbox((0, 0), club, font=font_mid)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, 435), club, fill=DARK, font=font_mid)
-
-    draw.line([(120, 490), (W - 120, 490)], fill=GOLD_LIGHT, width=2)
-
-    stats = p.get("stats_season", {})
-    pos = p.get("position", "ST")
-
-    if pos == "GK":
-        stat_lines = [("МАТЧЕЙ", str(stats.get("games", 0))), ("СЕЙВОВ", str(stats.get("saves", 0)))]
-    elif pos == "CB":
-        stat_lines = [("МАТЧЕЙ", str(stats.get("games", 0))),
-                      ("ОТБОРОВ", str(stats.get("tackles", 0))),
-                      ("ГОЛОВ", str(stats.get("goals", 0)))]
-    else:
-        stat_lines = [("МАТЧЕЙ", str(stats.get("games", 0))),
-                      ("ГОЛОВ", str(stats.get("goals", 0))),
-                      ("АССИСТОВ", str(stats.get("assists", 0)))]
-
-    y = 530
-    for label, value in stat_lines:
-        draw.text((120, y), label, fill=GRAY, font=font_label)
-        bbox = draw.textbbox((0, 0), value, font=font_mid)
-        vw = bbox[2] - bbox[0]
-        draw.text((W - 120 - vw, y), value, fill=GOLD, font=font_mid)
-        y += 50
-
-    draw.line([(120, y + 10), (W - 120, y + 10)], fill=GOLD_LIGHT, width=2)
-    y += 40
-
-    money = f"{p.get('money', 0):,}".replace(",", " ")
-    val = calculate_player_value(p["rating"], p["division"])
-    val_str = f"{val:,}".replace(",", " ")
-
-    draw.text((120, y), "БАЛАНС", fill=GRAY, font=font_label)
-    bbox = draw.textbbox((0, 0), f"{money}$", font=font_mid)
-    vw = bbox[2] - bbox[0]
-    draw.text((W - 120 - vw, y), f"{money}$", fill=GOLD, font=font_mid)
-    y += 50
-
-    draw.text((120, y), "СТОИМОСТЬ", fill=GRAY, font=font_label)
-    bbox = draw.textbbox((0, 0), f"{val_str}$", font=font_mid)
-    vw = bbox[2] - bbox[0]
-    draw.text((W - 120 - vw, y), f"{val_str}$", fill=GOLD, font=font_mid)
-    y += 60
-
-    draw.line([(120, y), (W - 120, y)], fill=GOLD_LIGHT, width=2)
-    y += 30
-
-    season = min(p.get("season", 1), 13)
-    tour = min(p.get("tour", 1), 30)
-    footer = f"Сезон {season}  ·  Тур {tour}/30"
-    bbox = draw.textbbox((0, 0), footer, font=font_sub)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, y), footer, fill=GRAY, font=font_sub)
-
-    y += 45
-    sal = p.get("contract_salary", 0)
-    sp = p.get("sponsor") or "нет"
-    line2 = f"Зарплата: {sal}$/матч  ·  Спонсор: {sp}"
-    bbox = draw.textbbox((0, 0), line2, font=font_small)
-    tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) / 2, y), line2, fill=GRAY, font=font_small)
-
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-# ============================================================
-# НОМИНАЦИИ СЕЗОНА
-# ============================================================
 
 @dp.callback_query(F.data == "menu_awards")
 @with_user_lock
@@ -2722,10 +2577,6 @@ async def awards_history_handler(callback: CallbackQuery):
         pass
 
 
-# ============================================================
-# СТАТИСТИКА ЛИГИ
-# ============================================================
-
 @dp.callback_query(F.data == "menu_league_stats")
 @with_user_lock
 async def league_stats_menu_handler(callback: CallbackQuery):
@@ -2744,8 +2595,10 @@ async def league_stats_menu_handler(callback: CallbackQuery):
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
     ])
 
-    text = (f"📊 **СТАТИСТИКА ЛИГИ: {division}**\n━━━━━━━━━━━━━━━━━━━━\n"
-            "Выбери категорию:")
+    text = (
+        f"📊 **СТАТИСТИКА ЛИГИ: {division}**\n━━━━━━━━━━━━━━━━━━━━\n"
+        "Выбери категорию:"
+    )
 
     if callback.message.photo:
         await callback.message.delete()
@@ -2817,10 +2670,6 @@ async def league_top_handler(callback: CallbackQuery):
         except Exception:
             await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
-
-# ============================================================
-# ЕВРОКУБКИ - МЕНЮ
-# ============================================================
 
 @dp.callback_query(F.data == "menu_euro")
 @with_user_lock
@@ -3205,7 +3054,8 @@ async def euro_playoff_menu_handler(callback: CallbackQuery):
     if p.get("euro_tournament") == "none" or p.get("euro_playoff_stage") == "eliminated":
         try:
             await callback.message.edit_text(
-                f"🏆 **ПЛЕЙ-ОФФ {euro_info.get('name', '')}**\n━━━━━━━━━━━━━━━━━━━━\n😔 Ты вылетел.",
+                f"🏆 **ПЛЕЙ-ОФФ {euro_info.get('name', '')}**\n━━━━━━━━━━━━━━━━━━━━\n"
+                "😔 Ты вылетел.",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(text="🔙 Назад", callback_data="menu_euro")]
@@ -3533,6 +3383,8 @@ async def euro_playoff_match_handler(callback: CallbackQuery, state: FSMContext,
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
     except TelegramBadRequest:
         pass
+
+
 async def start_penalty_shootout(callback: CallbackQuery, state: FSMContext, user_id: str):
     data = await state.get_data()
     m = data.get("match")
@@ -3963,10 +3815,6 @@ async def finish_euro_playoff_match(callback: CallbackQuery, state: FSMContext, 
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 
-# ============================================================
-# ИНТЕРВЬЮ
-# ============================================================
-
 async def start_interview(callback: CallbackQuery, state: FSMContext, user_id: str, p: dict):
     questions = [
         {
@@ -4087,10 +3935,6 @@ async def interview_handler(callback: CallbackQuery, state: FSMContext):
             await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 
-# ============================================================
-# TRANSFER OFFERS
-# ============================================================
-
 def _pick_offers_by_rating(rating: float, current_club: str, current_division: str) -> list:
     low = max(0, int(rating) - 15)
     high = min(100, int(rating) + 20)
@@ -4129,9 +3973,7 @@ def _pick_offers_by_rating(rating: float, current_club: str, current_division: s
             if len(offers) == 4:
                 break
     return offers
-# ============================================================
-# ОСНОВНОЙ МАТЧ ЛИГИ
-# ============================================================
+
 
 @dp.callback_query(F.data.startswith("scandal_club:"))
 @with_user_lock
@@ -4394,10 +4236,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
     await _show_moment(callback, state, user_id, match_data, key, "match")
 
 
-# ============================================================
-# МЕНЮ: ОНЛАЙН, ЗАЛ СЛАВЫ, СПОНСОРЫ, КВЕСТЫ, ЛИЧНАЯ ЖИЗНЬ
-# ============================================================
-
 @dp.callback_query(F.data == "menu_online")
 async def online_handler(callback: CallbackQuery):
     players = await load_data(PLAYERS_FILE)
@@ -4658,15 +4496,12 @@ async def personal_action(callback: CallbackQuery):
         pass
 
 
-# ============================================================
-# АДМИН-ПАНЕЛЬ
-# ============================================================
-
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
     if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
         return await callback.answer("Нет доступа.", show_alert=True)
-    text = "👑 Отправь ID пользователя (например `123456_1`):"
+    text = ("👑 Отправь ID пользователя (например `123456_1`):\n\n"
+            "📸 Для фото профиля: отправь фото с подписью `profile_<user_id>`")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_menu")]
     ])
@@ -4733,14 +4568,19 @@ async def show_admin_user_profile(msg_or_call, target_id):
     else:
         stats_text = f"⚽ Голы: {p['stats_season'].get('goals', 0)} | 🅰️ {p['stats_season'].get('assists', 0)}"
 
+    profile_img = await get_profile_image(target_id)
+    photo_line = f"📸 Фото профиля: {'✅ есть' if profile_img else '❌ нет'}\n"
+
     text = (
         f"👑 ПРОФИЛЬ\n📱 TG ID: `{tg_id}`\n💾 Полный ID: `{target_id}`\n📁 Слот: {slot}\n"
+        f"{photo_line}"
         f"🏃 {p['name']} | 🌍 {p.get('nation', 'Россия')} | 🎂 {p.get('age', 17)}\n"
         f"⚡ Рейтинг: {p['rating']}/100\n🏢 {p['club']} ({p['position']})\n"
         f"💵 {p.get('money', 0)}$ | 🏷 {val:,}$\n"
         f"🏟 Сезон: {p['season']} | Тур: {p['tour']}/30\n"
         f"🌍 Еврокубки: {get_euro_name(p.get('euro_tournament', 'none'))}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n{stats_text}"
+        f"━━━━━━━━━━━━━━━━━━━━\n{stats_text}\n\n"
+        f"📸 Чтобы добавить фото профиля, отправь фото с подписью:\n`profile_{target_id}`"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -4748,6 +4588,7 @@ async def show_admin_user_profile(msg_or_call, target_id):
          InlineKeyboardButton(text="⏭ Сезон (+1)", callback_data=f"adm_season:{target_id}")],
         [InlineKeyboardButton(text="💰 Деньги", callback_data=f"adm_money:{target_id}"),
          InlineKeyboardButton(text="⚡ Рейтинг", callback_data=f"adm_rating:{target_id}")],
+        [InlineKeyboardButton(text="🖼 Удалить фото", callback_data=f"adm_delphoto:{target_id}")],
         [InlineKeyboardButton(text="🔙 В меню", callback_data="back_to_menu")]
     ])
 
@@ -4758,6 +4599,21 @@ async def show_admin_user_profile(msg_or_call, target_id):
             await msg_or_call.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
         except TelegramBadRequest:
             pass
+
+
+@dp.callback_query(F.data.startswith("adm_delphoto:"))
+async def adm_del_photo(callback: CallbackQuery):
+    if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
+        return await callback.answer("Ошибка доступа.", show_alert=True)
+    target_id = callback.data.split(":")[1]
+    images = await load_data(PROFILE_IMAGES_FILE)
+    if target_id in images:
+        del images[target_id]
+        await save_data(PROFILE_IMAGES_FILE, images)
+        await callback.answer("🖼 Фото профиля удалено.", show_alert=True)
+    else:
+        await callback.answer("Фото и так нет.", show_alert=True)
+    await show_admin_user_profile(callback, target_id)
 
 
 @dp.callback_query(F.data.startswith("adm_tour:"))
@@ -4880,10 +4736,6 @@ async def adm_process_rating(message: Message, state: FSMContext):
             await show_admin_user_profile(message, target_id)
     await state.clear()
 
-
-# ============================================================
-# START И СОЗДАНИЕ ПЕРСОНАЖА
-# ============================================================
 
 @dp.message(F.text == "/start")
 async def start_cmd(message: Message, state: FSMContext):
@@ -5098,6 +4950,10 @@ async def delete_career_final(callback: CallbackQuery, state: FSMContext):
     if user_id in players:
         del players[user_id]
         await save_data(PLAYERS_FILE, players)
+    images = await load_data(PROFILE_IMAGES_FILE)
+    if user_id in images:
+        del images[user_id]
+        await save_data(PROFILE_IMAGES_FILE, images)
     await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📁 Слот 1", callback_data="select_slot:1"),
@@ -5105,10 +4961,6 @@ async def delete_career_final(callback: CallbackQuery, state: FSMContext):
     ])
     await callback.message.edit_text("🗑 Удалено. Выбери слот:", reply_markup=kb, parse_mode="Markdown")
 
-
-# ============================================================
-# ТРЕНИРОВКИ
-# ============================================================
 
 @dp.callback_query(F.data == "menu_train_choice")
 @with_user_lock
@@ -5236,10 +5088,6 @@ async def train_execute_handler(callback: CallbackQuery):
                                   ]))
 
 
-# ============================================================
-# БАЗОВЫЕ МЕНЮ
-# ============================================================
-
 @dp.callback_query(F.data == "back_to_menu")
 async def back_to_menu_handler(callback: CallbackQuery):
     user_id = await get_uid(callback)
@@ -5290,7 +5138,6 @@ async def profile_handler(callback: CallbackQuery):
     p = (await load_data(PLAYERS_FILE)).get(user_id)
     if not p:
         return await callback.message.answer("⚠️ Нажми /start")
-
     if p.get("retired"):
         history = "\n\n".join(p.get("career_history", [])) or "—"
         text = (
@@ -5308,42 +5155,91 @@ async def profile_handler(callback: CallbackQuery):
                 await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
         return
 
+    val = calculate_player_value(p["rating"], p["division"])
+    loan_status = f"\n⚠️ Аренда из {p['parent_club']}" if p.get("on_loan") else ""
+    injury_status = f"\n🚑 Травма: {p.get('injury_tours', 0)} тур." if p.get("injury_tours", 0) > 0 else ""
+
+    if p["position"] == "GK":
+        stats_text = f"🧤 Сейвы: {p['stats_season'].get('saves', 0)}"
+    elif p["position"] == "CB":
+        stats_text = f"🛡️ Отборы: {p['stats_season'].get('tackles', 0)} | ⚽ {p['stats_season'].get('goals', 0)}"
+    else:
+        stats_text = f"⚽ {p['stats_season'].get('goals', 0)} | 🅰️ {p['stats_season'].get('assists', 0)}"
+
+    history_str = ""
+    if p.get("career_history"):
+        history_str = "\n\n📚 **Прошлые карьеры:**\n" + "\n\n".join(p["career_history"])
+
+    season_display = min(p['season'], 13)
+    tour_display = min(p['tour'], 30)
+
+    train_stats = (
+        f"\n📊 **Тренировки:**\n🔥 Серия: {p.get('train_streak', 0)}\n"
+        f"📈 Всего: {p.get('train_count', 0)}\n"
+        f"🏅 Достижений: {len(p.get('train_achievements', []))}"
+    )
+
+    euro_stats = ""
+    if p.get("euro_tournament") and p.get("euro_tournament") != "none":
+        euro_stats = (
+            f"\n🌍 **Еврокубки:** {get_euro_name(p['euro_tournament'])}\n"
+            f"Матчей: {p.get('euro_matches', 0)} | Голов: {p.get('euro_goals', 0)} | "
+            f"Ассистов: {p.get('euro_assists', 0)}"
+        )
+
+    text = (
+        f"👑 ПРОФИЛЬ\n━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏃 {p['name']} | 🌍 {p.get('nation', 'Россия')} | 🎂 {p.get('age', 17)}\n"
+        f"⚡ Рейтинг: {p['rating']}/100\n"
+        f"🏢 {p['club']} ({p['position']}){loan_status}{injury_status}\n"
+        f"💵 Баланс: {p.get('money', 0)}$ | 🏷 Стоимость: {val:,}$\n"
+        f"🤝 Зарплата: {p.get('contract_salary', 0)}$/матч\n"
+        f"💎 Спонсор: {p.get('sponsor', 'Нет')}\n"
+        f"📊 Статус: {get_status_by_trust(p['trust'])}\n"
+        f"🔋 Усталость: {p.get('fatigue', 0)}%\n"
+        f"💍 Девушка: {p.get('girlfriend', 'Нет')}\n"
+        f"🏟 Сезон: {season_display}/13 | Тур: {tour_display}/30\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 **За сезон:** {stats_text}\n"
+        f"📈 **Всего:** Игр: {p.get('stats_total', {}).get('games', 0)} | "
+        f"Голов: {p.get('stats_total', {}).get('goals', 0)} | "
+        f"Ассистов: {p.get('stats_total', {}).get('assists', 0)}"
+        f"{euro_stats}{train_stats}{history_str}"
+    )
+
     kb = await main_menu_keyboard(callback.from_user.username, user_id)
     kb.inline_keyboard.append([InlineKeyboardButton(text="🗑 Удалить карьеру", callback_data="delete_career")])
 
-    try:
-        photo_buf = await generate_profile_image(p)
-    except Exception as e:
-        logging.warning(f"generate_profile_image error: {e}")
-        text = f"👑 {p['name']} | ⚡ {p['rating']} | 🏢 {p['club']}"
+    profile_photo = await get_profile_image(user_id)
+
+    if profile_photo:
         try:
             if callback.message.photo:
-                await callback.message.delete()
-                await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+                await callback.message.edit_media(
+                    media=InputMediaPhoto(media=profile_photo, caption=text, parse_mode="Markdown"),
+                    reply_markup=kb
+                )
             else:
-                await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
-        except Exception:
-            await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
-        return
+                await callback.message.delete()
+                await callback.message.answer_photo(
+                    photo=profile_photo, caption=text, parse_mode="Markdown", reply_markup=kb
+                )
+        except TelegramBadRequest:
+            if callback.message.photo:
+                await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=profile_photo, caption=text, parse_mode="Markdown", reply_markup=kb
+            )
+    else:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=kb)
+        else:
+            try:
+                await callback.message.edit_text(text, reply_markup=kb)
+            except Exception:
+                await callback.message.answer(text, reply_markup=kb)
 
-    caption = f"👑 **{p['name']}** | ⚡ {p['rating']}/100"
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-    try:
-        await callback.message.answer_photo(
-            photo=photo_buf,
-            caption=caption,
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
-    except Exception as e:
-        logging.warning(f"profile photo send error: {e}")
-        await callback.message.answer(caption, reply_markup=kb, parse_mode="Markdown")
-# ============================================================
-# SEASON RESULTS
-# ============================================================
 
 def _season_choice_pending(p: dict) -> bool:
     return bool(p.get("_season_pending") or p.get("_season_offers"))
@@ -5624,10 +5520,6 @@ async def season_choice_handler(callback: CallbackQuery):
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 
-# ============================================================
-# ЗАПУСК
-# ============================================================
-
 async def ensure_files_exist():
     files_defaults = {
         PLAYERS_FILE: {},
@@ -5637,6 +5529,7 @@ async def ensure_files_exist():
         AWARDS_FILE: {},
         NPC_FILE: {},
         MOMENT_IMAGES_FILE: {},
+        PROFILE_IMAGES_FILE: {},
     }
     for filename, default_value in files_defaults.items():
         if not os.path.exists(filename):
@@ -5646,14 +5539,9 @@ async def ensure_files_exist():
 
 async def main():
     print("🚀 Бот запущен и ожидает сообщений...")
-    print("📌 НОВАЯ МЕХАНИКА МОМЕНТОВ: 32 сценария, по 8 на каждую позицию")
-    print("📌 Шансы голов/ассистов СНИЖЕНЫ — реалистичная статистика за сезон")
-    print("📌 Моментов за матч: 3-6 (зависит от trust и rating)")
-    print("📌 Фото профиля: генерируется автоматически (нужен Pillow)")
-    print("📌 Картинки моментов: /set, /moment_keys, /moment_stats")
-    print("📌 Еврокубки: 36 клубов, 8 туров (round-robin)")
-    print("📌 Плей-офф: стыки + 1/8, 1/4, 1/2, Финал (доп. время и пенальти)")
-    print("📌 Номинации сезона: Лучший клуб, ЗМ, ЗП, ЛЗ, ЛА")
+    print("📌 Пониженные шансы голов/ассистов (множитель 0.45)")
+    print("📌 Фото профиля: админ кидает фото с подписью `profile_<user_id>`")
+    print("📌 Моменты: /set, /moment_keys, /moment_stats")
 
     await ensure_files_exist()
     os.makedirs(EURO_DIR, exist_ok=True)
