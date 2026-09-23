@@ -1913,8 +1913,15 @@ async def get_moment_image(scenario_key: str):
 
 
 async def get_profile_image(user_id: str):
+    """Возвращает фото профиля: сначала личное, потом глобальное (случайное)."""
     images = await load_data(PROFILE_IMAGES_FILE)
-    return images.get(user_id)
+    personal = images.get(user_id)
+    if personal:
+        return personal
+    glob = images.get("__global__") or []
+    if glob:
+        return random.choice(glob)
+    return None
 
 
 async def send_or_edit_moment(callback: CallbackQuery, text: str, kb, scenario_key: str):
@@ -1962,11 +1969,31 @@ async def save_photo_handler(message: Message):
             key = parts[1].strip()
     if not key:
         return await message.answer(
-            "❌ Не вижу ключ.\nКинь фото с подписью-ключом (например `st_one_on_one`)\n"
-            "или `profile_<user_id>` для фото профиля.\nСписок: /moment_keys",
+            "❌ Не вижу ключ.\n"
+            "• Глобальное фото профиля: подпись `profile`\n"
+            "• Личное фото профиля: `profile_<user_id>`\n"
+            "• Фото момента: `st_one_on_one` и т.п.\nСписок: /moment_keys",
             parse_mode="Markdown"
         )
 
+    # ---- ГЛОБАЛЬНОЕ ФОТО ПРОФИЛЯ ----
+    if key.lower() == "profile":
+        file_id = message.photo[-1].file_id
+        images = await load_data(PROFILE_IMAGES_FILE)
+        images.setdefault("__global__", [])
+        if file_id in images["__global__"]:
+            return await message.answer("⚠️ Это фото уже добавлено в глобальные.", parse_mode="Markdown")
+        images["__global__"].append(file_id)
+        if len(images["__global__"]) > 5:
+            images["__global__"] = images["__global__"][-5:]
+        await save_data(PROFILE_IMAGES_FILE, images)
+        return await message.answer(
+            f"✅ Глобальное фото профиля сохранено ({len(images['__global__'])}/5).\n"
+            f"Будет показываться всем игрокам без личного фото.",
+            parse_mode="Markdown"
+        )
+
+    # ---- ЛИЧНОЕ ФОТО ПРОФИЛЯ ----
     if key.startswith("profile_"):
         target_uid = key[len("profile_"):].strip()
         players = await load_data(PLAYERS_FILE)
@@ -1980,10 +2007,11 @@ async def save_photo_handler(message: Message):
         images[target_uid] = file_id
         await save_data(PROFILE_IMAGES_FILE, images)
         return await message.answer(
-            f"✅ Фото профиля для `{target_uid}` сохранено.",
+            f"✅ Личное фото профиля для `{target_uid}` сохранено.",
             parse_mode="Markdown"
         )
 
+    # ---- ФОТО МОМЕНТОВ ----
     key_lower = key.lower()
     if key_lower not in MOMENT_KEYS:
         return await message.answer(
@@ -2012,8 +2040,9 @@ async def set_cmd(message: Message):
         return
     await message.answer(
         "📸 Кинь фото боту с подписью-ключом.\n"
-        "Для моментов: `st_one_on_one`, `gk_penalty` и т.д.\n"
-        "Для профиля игрока: `profile_<user_id>` (например `profile_123456789_1`).\n\n"
+        "• Глобальное фото профиля (для всех): `profile`\n"
+        "• Личное фото профиля: `profile_<user_id>` (например `profile_123456789_1`)\n"
+        "• Для моментов: `st_one_on_one`, `gk_penalty` и т.д.\n\n"
         "Список моментов: /moment_keys\nСтатистика: /moment_stats",
         parse_mode="Markdown"
     )
@@ -2039,7 +2068,11 @@ async def moment_keys_cmd(message: Message):
             cnt = len(images.get(k, []))
             check = "✅" if cnt > 0 else "⬜"
             text += f"{check} `{k}` — {MOMENT_KEYS_DESC.get(k, '')} ({cnt}/3)\n"
-    text += "\n🖼 **Фото профиля:** `profile_<user_id>` (например `profile_123456789_1`)"
+    text += (
+        "\n🖼 **Фото профиля:**\n"
+        "• Глобальное (для всех): `profile`\n"
+        "• Личное (для одного): `profile_<user_id>` (напр. `profile_123456789_1`)"
+    )
     if len(text) > 4000:
         text = text[:4000] + "\n…обрезано"
     await message.answer(text, parse_mode="Markdown")
@@ -2056,12 +2089,16 @@ async def moment_stats_cmd(message: Message):
     photos = sum(len(images.get(k, [])) for k in MOMENT_KEYS)
     missing = [k for k in MOMENT_KEYS if not images.get(k)]
     profiles = await load_data(PROFILE_IMAGES_FILE)
+    global_count = len(profiles.get("__global__", []))
+    personal_count = len([k for k in profiles.keys() if k != "__global__"])
     text = (f"📊 **СТАТИСТИКА КАРТИНОК**\n🔑 {filled}/{total}\n🖼 {photos}/{total * 3}\n"
-            f"👤 Фото профилей: {len(profiles)}")
+            f"👤 Фото профилей: 🌍 глобальных {global_count}/5, личных {personal_count}")
     if missing:
         text += f"\n\n❌ Пусто ({len(missing)}):\n" + ", ".join(f"`{k}`" for k in missing[:20])
     await message.answer(text, parse_mode="Markdown")
-
+# ============================================================
+# НОВАЯ МЕХАНИКА МОМЕНТОВ (ПОНИЖЕННЫЕ ШАНСЫ ГОЛА/АССИСТА)
+# ============================================================
 
 GOAL_CHANCE_MULTIPLIER = 0.45
 
@@ -2464,6 +2501,10 @@ async def _continue_match(callback: CallbackQuery, state: FSMContext, user_id: s
     await _show_moment(callback, state, user_id, m, new_key, match_ctx)
 
 
+# ============================================================
+# НОМИНАЦИИ СЕЗОНА
+# ============================================================
+
 @dp.callback_query(F.data == "menu_awards")
 @with_user_lock
 async def awards_menu_handler(callback: CallbackQuery):
@@ -2577,6 +2618,10 @@ async def awards_history_handler(callback: CallbackQuery):
         pass
 
 
+# ============================================================
+# СТАТИСТИКА ЛИГИ
+# ============================================================
+
 @dp.callback_query(F.data == "menu_league_stats")
 @with_user_lock
 async def league_stats_menu_handler(callback: CallbackQuery):
@@ -2670,6 +2715,10 @@ async def league_top_handler(callback: CallbackQuery):
         except Exception:
             await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
+
+# ============================================================
+# ЕВРОКУБКИ - МЕНЮ
+# ============================================================
 
 @dp.callback_query(F.data == "menu_euro")
 @with_user_lock
@@ -4029,8 +4078,6 @@ async def scandal_club_choice_handler(callback: CallbackQuery):
         parse_mode="Markdown",
         reply_markup=await main_menu_keyboard(callback.from_user.username, user_id)
     )
-
-
 @dp.callback_query(F.data == "menu_match")
 @with_user_lock
 async def match_handler(callback: CallbackQuery, state: FSMContext):
@@ -4063,7 +4110,6 @@ async def match_handler(callback: CallbackQuery, state: FSMContext):
             )
 
     trust = p.get("trust", 15)
-    status = get_status_by_trust(trust)
 
     if trust < 21:
         p["tour"] += 1
@@ -4500,8 +4546,11 @@ async def personal_action(callback: CallbackQuery):
 async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
     if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
         return await callback.answer("Нет доступа.", show_alert=True)
-    text = ("👑 Отправь ID пользователя (например `123456_1`):\n\n"
-            "📸 Для фото профиля: отправь фото с подписью `profile_<user_id>`")
+    text = (
+        "👑 Отправь ID пользователя (например `123456_1`):\n\n"
+        "📸 **Глобальное фото профиля** (для всех игроков): пришли фото с подписью `profile`\n"
+        "📸 **Личное фото профиля**: пришли фото с подписью `profile_<user_id>`"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_menu")]
     ])
@@ -4568,8 +4617,15 @@ async def show_admin_user_profile(msg_or_call, target_id):
     else:
         stats_text = f"⚽ Голы: {p['stats_season'].get('goals', 0)} | 🅰️ {p['stats_season'].get('assists', 0)}"
 
-    profile_img = await get_profile_image(target_id)
-    photo_line = f"📸 Фото профиля: {'✅ есть' if profile_img else '❌ нет'}\n"
+    images = await load_data(PROFILE_IMAGES_FILE)
+    has_personal = target_id in images
+    has_global = bool(images.get("__global__"))
+    if has_personal:
+        photo_line = "📸 Фото профиля: ✅ личное\n"
+    elif has_global:
+        photo_line = "📸 Фото профиля: 🌍 глобальное\n"
+    else:
+        photo_line = "📸 Фото профиля: ❌ нет\n"
 
     text = (
         f"👑 ПРОФИЛЬ\n📱 TG ID: `{tg_id}`\n💾 Полный ID: `{target_id}`\n📁 Слот: {slot}\n"
@@ -4580,7 +4636,7 @@ async def show_admin_user_profile(msg_or_call, target_id):
         f"🏟 Сезон: {p['season']} | Тур: {p['tour']}/30\n"
         f"🌍 Еврокубки: {get_euro_name(p.get('euro_tournament', 'none'))}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n{stats_text}\n\n"
-        f"📸 Чтобы добавить фото профиля, отправь фото с подписью:\n`profile_{target_id}`"
+        f"📸 Фото: `profile` (глоб.) или `profile_{target_id}` (личное)"
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -4588,7 +4644,7 @@ async def show_admin_user_profile(msg_or_call, target_id):
          InlineKeyboardButton(text="⏭ Сезон (+1)", callback_data=f"adm_season:{target_id}")],
         [InlineKeyboardButton(text="💰 Деньги", callback_data=f"adm_money:{target_id}"),
          InlineKeyboardButton(text="⚡ Рейтинг", callback_data=f"adm_rating:{target_id}")],
-        [InlineKeyboardButton(text="🖼 Удалить фото", callback_data=f"adm_delphoto:{target_id}")],
+        [InlineKeyboardButton(text="🖼 Удалить личное фото", callback_data=f"adm_delphoto:{target_id}")],
         [InlineKeyboardButton(text="🔙 В меню", callback_data="back_to_menu")]
     ])
 
@@ -4610,9 +4666,9 @@ async def adm_del_photo(callback: CallbackQuery):
     if target_id in images:
         del images[target_id]
         await save_data(PROFILE_IMAGES_FILE, images)
-        await callback.answer("🖼 Фото профиля удалено.", show_alert=True)
+        await callback.answer("🖼 Личное фото профиля удалено.", show_alert=True)
     else:
-        await callback.answer("Фото и так нет.", show_alert=True)
+        await callback.answer("У игрока нет личного фото (используется глобальное).", show_alert=True)
     await show_admin_user_profile(callback, target_id)
 
 
@@ -5540,7 +5596,8 @@ async def ensure_files_exist():
 async def main():
     print("🚀 Бот запущен и ожидает сообщений...")
     print("📌 Пониженные шансы голов/ассистов (множитель 0.45)")
-    print("📌 Фото профиля: админ кидает фото с подписью `profile_<user_id>`")
+    print("📌 Глобальное фото профиля: админ кидает фото с подписью `profile`")
+    print("📌 Личное фото профиля: фото с подписью `profile_<user_id>`")
     print("📌 Моменты: /set, /moment_keys, /moment_stats")
 
     await ensure_files_exist()
