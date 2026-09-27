@@ -21,7 +21,7 @@ from aiogram.exceptions import TelegramBadRequest
 from PIL import Image, ImageDraw, ImageFont
 
 logging.basicConfig(level=logging.INFO)
-BOT_TOKEN = "8979310355:AAGPshB3WEGHVx33ZPjd9uIxQpY8wrGmy_8"
+BOT_TOKEN = "8979310355:AAGt4aawxyJ0TRBizn_sp3Lz7jBhS5H7gdI"
 
 SPONSOR_CHANNEL_ID = "@jdoauqh"
 SPONSOR_CHANNEL_URL = "https://t.me/jdoauqh"
