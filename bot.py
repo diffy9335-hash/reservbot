@@ -2583,13 +2583,21 @@ async def menu_world_cup_handler(callback: CallbackQuery):
 
     buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")])
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    # Если текущее сообщение — фото (таблица PNG), его нельзя edit_text'ом: удаляем и шлём новое
+    if callback.message.photo:
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
+        return
     try:
         await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    except TelegramBadRequest:
-        pass
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            return
+        await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
     except Exception:
-        if callback.message.photo:
-            await callback.message.delete()
         await callback.message.answer(text, parse_mode="Markdown", reply_markup=kb)
 
 
@@ -3091,6 +3099,16 @@ async def moment_stats_cmd(message: Message):
 # ============================================================
 
 GOAL_CHANCE_MULTIPLIER = 0.45
+ADMIN_GOAL_CHANCE_MULTIPLIER = 0.70
+# Админы, нажавшие /start или открывшие админ-панель, получают повышенный множитель (0.70)
+ADMIN_BOOST_USERNAMES: set = set()
+
+
+def _activate_admin_boost(username):
+    if username:
+        name = username.replace("@", "")
+        if name in ADMINS:
+            ADMIN_BOOST_USERNAMES.add(name)
 
 
 async def _show_moment(callback: CallbackQuery, state: FSMContext, user_id: str, m: dict,
@@ -3150,7 +3168,8 @@ async def _show_moment(callback: CallbackQuery, state: FSMContext, user_id: str,
 
 def _action_chance(base: float, p: dict, rival_rating: int, bonus: float = 0.0) -> float:
     chance = base + ((p.get("rating", 40) - rival_rating) * 0.010) + bonus
-    chance *= GOAL_CHANCE_MULTIPLIER
+    uname = (p.get("username_tg") or "").replace("@", "")
+    chance *= ADMIN_GOAL_CHANCE_MULTIPLIER if uname in ADMIN_BOOST_USERNAMES else GOAL_CHANCE_MULTIPLIER
     return max(0.02, min(0.85, chance))
 
 
@@ -5591,6 +5610,7 @@ async def personal_action(callback: CallbackQuery):
 async def admin_panel_handler(callback: CallbackQuery, state: FSMContext):
     if not callback.from_user.username or callback.from_user.username.replace("@", "") not in ADMINS:
         return await callback.answer("Нет доступа.", show_alert=True)
+    _activate_admin_boost(callback.from_user.username)
     text = (
         "👑 Отправь ID пользователя (например `123456_1`):\n\n"
         "📸 **Глобальное фото профиля** (для всех игроков): пришли фото с подписью `profile`\n"
@@ -5841,6 +5861,7 @@ async def adm_process_rating(message: Message, state: FSMContext):
 @dp.message(F.text == "/start")
 async def start_cmd(message: Message, state: FSMContext):
     await state.clear()
+    _activate_admin_boost(message.from_user.username)
     if not await check_sub(message.from_user.id):
         return await message.answer(
             "❗️ **Подпишись на спонсора!**",
